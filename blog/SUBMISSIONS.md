@@ -1,8 +1,14 @@
 # Submission blurbs — Agents of SigNoz
 
 Ready-to-paste copy for the submission form (https://forms.gle/wf9tFYcksrk6P4Zy8),
-the blog platform, and Social Buzz. Fill in `<YOUR_URL>` / `<YOUR_HANDLE>` after
-publishing. All three blogs share one repo and one live self-hosted SigNoz.
+the blog platform, and Social Buzz. All three blogs share one repo and one live
+self-hosted SigNoz.
+
+**PUBLISHED (account: gajanangitte):**
+- Blog #1 (eyes): https://dev.to/gajanangitte/i-gave-a-local-llama-agent-opentelemetry-eyes-tracing-tokens-cost-and-the-latency-tail-in-4380
+- Blog #2 (retry tax): https://dev.to/gajanangitte/the-retry-tax-what-a-local-llama-agents-silent-retries-actually-cost-measured-in-self-hosted-3io2
+- Blog #3 (MCP self-debug): https://dev.to/gajanangitte/i-gave-my-local-llama-agent-the-signoz-mcp-server-and-asked-it-to-debug-itself-5909
+- Repo: https://github.com/gajanangitte/observable-agent
 
 ---
 
@@ -26,7 +32,7 @@ dashboard. Real commands, real numbers, one honest walkthrough.
 >
 > I gave a local Llama agent OpenTelemetry eyes and watched every LLM call,
 > token, and dollar land in self-hosted @SigNozHQ — no API keys, all on my
-> laptop. Full walkthrough 👇 <YOUR_URL>
+> laptop. Full walkthrough 👇 https://dev.to/gajanangitte/i-gave-a-local-llama-agent-opentelemetry-eyes-tracing-tokens-cost-and-the-latency-tail-in-4380
 >
 > #AgentsOfSigNoz @wemakedevs
 
@@ -51,7 +57,7 @@ tokens (38%), +32% latency. I built a dashboard and a v5 alert rule that fires o
 >
 > I injected the fault, ran control-vs-chaos cohorts, and watched 4,393 wasted
 > tokens (38%!) show up as duplicate spans in self-hosted @SigNozHQ — then
-> alerted on it. 👇 <YOUR_URL>
+> alerted on it. 👇 https://dev.to/gajanangitte/the-retry-tax-what-a-local-llama-agents-silent-retries-actually-cost-measured-in-self-hosted-3io2
 >
 > #AgentsOfSigNoz @wemakedevs
 
@@ -78,7 +84,7 @@ the math.
 >
 > I wired the @SigNozHQ MCP server into a local Llama. Asked for its bottleneck,
 > it queried its own telemetry and nailed it: model calls ~67,000× slower than
-> tools. The self-debug session is itself a trace. 👇 <YOUR_URL>
+> tools. The self-debug session is itself a trace. 👇 https://dev.to/gajanangitte/i-gave-my-local-llama-agent-the-signoz-mcp-server-and-asked-it-to-debug-itself-5909
 >
 > #AgentsOfSigNoz @wemakedevs
 
@@ -106,6 +112,6 @@ are deterministic MCP queries; the LLM only decides.
 > My self-healing SRE agent uses self-hosted @SigNozHQ via MCP as a closed
 > control loop — detect → diagnose → act → verify, all one trace. A local model
 > read the incident FROM SigNoz and fixed it: retry rate 40%→0%, MTTR 141s. 👇
-> <YOUR_URL>
+> https://github.com/gajanangitte/observable-agent
 >
 > #AgentsOfSigNoz @wemakedevs

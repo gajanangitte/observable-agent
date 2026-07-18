@@ -15,3 +15,8 @@ blog/token.txt
 devto_articles.json
 .env
 .env.*
+
+# session automation scripts + form screenshots (contain personal identifiers; not deliverables)
+blog/devto_*.py
+blog/form_probe_url.py
+blog/shots_form/

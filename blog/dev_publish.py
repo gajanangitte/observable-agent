@@ -46,6 +46,9 @@ def _req(method, url, key, payload=None):
     r.add_header("api-key", key)
     r.add_header("Content-Type", "application/json")
     r.add_header("Accept", "application/vnd.forem.api-v1+json")
+    r.add_header("User-Agent",
+                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     with urllib.request.urlopen(r, timeout=60) as resp:
         return json.loads(resp.read().decode())
 
@@ -102,7 +105,10 @@ def build_payload(key_name, image_base, publish, links):
         "main_image": image_base + cover,
     }
     if fm.get("description"):
-        article["description"] = fm["description"]
+        desc = fm["description"]
+        if len(desc) > 150:
+            desc = desc[:147].rsplit(" ", 1)[0] + "..."
+        article["description"] = desc
     if fm.get("canonical_url"):
         article["canonical_url"] = fm["canonical_url"]
     return {"article": article}
