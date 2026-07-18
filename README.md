@@ -10,7 +10,7 @@ Built for the *Agents of SigNoz* hackathon (WeMakeDevs × SigNoz). It began as a
 instrumented SRE sidekick — traces, tokens, cost, and latency for every LLM call
 and tool — and grew into a closed control loop that turns observability into action.
 
-> The vision — an open, OTel-native control plane that heals AI agents: [`docs/PITCH.md`](docs/PITCH.md).
+> The vision — turning SigNoz-powered observability into action: an open, OTel-native reliability layer that *heals* AI agents on top of the telemetry SigNoz already gives you: [`docs/PITCH.md`](docs/PITCH.md).
 
 ---
 

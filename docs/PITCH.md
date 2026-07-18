@@ -1,8 +1,8 @@
-# Sentinel — the control plane that *heals* AI agents
+# Sentinel — turning SigNoz-native observability into action
 
-> **Datadog shows you the fire. We put it out — safely, autonomously — for the agentic era.**
+> **Datadog shows you the fire. We help you put it out — safely, autonomously — for the agentic era.**
 
-*Seed one-pager · working prototype: [`observable-agent`](../README.md) (this repo)*
+*Seed one-pager · built on open telemetry (SigNoz + OpenTelemetry + MCP) · working prototype: [`observable-agent`](../README.md) (this repo)*
 
 ---
 
@@ -11,12 +11,13 @@
 Enterprises are shipping AI agents into production faster than they can operate
 them. Agents fail in ways traditional software doesn't: they retry silently and
 double-spend tokens, loop and run up an unbounded bill, drift, hallucinate tool
-calls, and cascade across multi-step graphs. Today's answer is **passive**:
-LLM-observability tools (SigNoz, Langfuse, Arize, LangSmith) show you the trace
+calls, and cascade across multi-step graphs. Observability has caught up fast —
+an open, OTel-native stack like **SigNoz** already traces every LLM call, token,
+and dollar. But observability is **passive by design**: it shows you the trace
 *after* the money is gone and the customer is angry. Someone still has to wake up,
 read the dashboard, and fix it by hand.
 
-**Observability tells you the agent is on fire. It doesn't put the fire out.**
+**Great observability tells you the agent is on fire. Someone still has to put it out.**
 
 ## The insight
 
@@ -28,16 +29,16 @@ production needs **policy, blast-radius limits, rollback, and an audit trail**.
 
 ## The product
 
-**Sentinel is an open, OpenTelemetry-native reliability control plane for AI
-agents.** It sits *above* any telemetry backend you already run and turns
-observability into action:
+**Sentinel is an open, OpenTelemetry-native reliability layer for AI agents that
+turns observability into action.** It builds on the telemetry you already run —
+SigNoz + OTel + MCP — and closes the loop:
 
 - **Senses** agent-native SLOs from live traces (retry tax, runaway-spend, latency, tool-error, task-success).
 - **Diagnoses** with a model that reads the incident evidence out of your own telemetry.
 - **Acts within policy** — a governed `detect → diagnose → act → verify → rollback` loop with autonomy levels (observe → suggest → approve → auto), an action allow-list, blast-radius limits, and a runtime **cost kill-switch**.
 - **Proves it** — re-queries the same telemetry to confirm the fix, and records an immutable audit trail of *what changed, why it was allowed, and whether it worked.*
 
-We don't replace your metric store. We own the **intelligence + action** layer on top of it — local-first and private, so regulated and self-hosted teams can run it too.
+We don't replace your observability stack — we make it *act*. SigNoz stays the system of record and the scoreboard; we add the **intelligence + action** layer on top — local-first and private, so regulated and self-hosted teams can run it too.
 
 ## Why now
 
@@ -49,15 +50,21 @@ We don't replace your metric store. We own the **intelligence + action** layer o
 
 Agent/LLM observability is an estimated **~$0.55B (2025) → ~$2.05B by 2030 (~30% CAGR)** — and that's just the *watching* slice. Reliability + autonomous remediation for agents is a larger, adjacent budget (it comes out of SRE/platform, not just monitoring).
 
-## Competition & the wedge
+## Landscape & where we fit
 
-| Segment | Examples | What they do | The gap we fill |
+| Segment | Examples | What they do | Where we fit |
 |---|---|---|---|
-| LLM/agent observability | SigNoz, Langfuse, Arize, LangSmith | **Watch** agents; dashboards, evals | Passive — no governed action, no rollback |
-| Autonomous SRE | Resolve.ai (reported ~$1B), Cleric, Traversal | Fix **human infra** with closed, hosted models | Not agent-native; closed & cloud-only |
-| Agent frameworks | LangChain, CrewAI | **Build** agents | Don't operate what they build |
+| **Open telemetry — our foundation** | **SigNoz** · OpenTelemetry · MCP | The open, self-hostable trace/metric + query layer | **We build on it.** SigNoz is our sensor, diagnostic surface & scoreboard |
+| Manual / passive ops | Dashboards + human runbooks, Datadog-style | Watch, alert, page a human | We close the loop: governed auto-remediation |
+| Autonomous SRE (closed) | Resolve.ai (reported ~$1B), Cleric, Traversal | Fix **human infra** with closed, hosted models | We're agent-native, open & local-first |
+| Agent frameworks | LangChain, CrewAI | **Build** agents | We *operate* what they build |
 
-**Nobody heals *your own agents*, openly, with policy + rollback.** SigNoz already ships 40+ LLM integrations and an MCP server — so "add LLM traces to SigNoz" is a dead pitch. The open space is the **governed action layer above** any backend. We're OTel/MCP-native, so their ecosystem is our distribution, not our competitor.
+**We're not another dashboard — we make the open observability stack *act*.**
+SigNoz's rich LLM instrumentation and MCP server are exactly what make an open,
+self-hostable healing loop possible: they're our foundation and our distribution,
+not our competitor. The white space nobody owns yet is the **governed action
+layer** — healing *your own agents*, openly, with policy, rollback, and an audit
+trail.
 
 ## Moat
 
@@ -77,7 +84,7 @@ The prototype in this repo runs the full loop on a **laptop** (self-hosted SigNo
 
 ## Go-to-market
 
-- **ICP:** platform/SRE teams running agents in production who are **self-hosted or regulated** (fintech, healthcare, gov, EU data-residency) — they *can't* send prompts to a hosted SaaS and need local-model reasoning + auditable actions. Underserved by every cloud-only competitor.
+- **ICP:** platform/SRE teams running agents in production who are **self-hosted or regulated** (fintech, healthcare, gov, EU data-residency) — they *can't* send prompts to a hosted SaaS and need local-model reasoning + auditable actions. Underserved by every cloud-only, closed-model vendor.
 - **Wedge feature:** the cost kill-switch (fast "yes", clear ROI) → land → expand into full remediation.
 - **Motion:** open-source core (developer trust + adoption) → paid governance, multi-agent graph remediation, team audit/compliance, and managed control plane.
 
