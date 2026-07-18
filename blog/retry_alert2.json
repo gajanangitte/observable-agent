@@ -1,0 +1,48 @@
+{
+  "alert": "Agent Retry Tax: LLM responses being retried",
+  "alertType": "TRACES_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "evalWindow": "5m0s",
+  "frequency": "1m0s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "builder",
+      "panelType": "graph",
+      "unit": "",
+      "builder": {
+        "queryData": [
+          {
+            "aggregations": [{ "expression": "count()" }],
+            "dataSource": "traces",
+            "disabled": false,
+            "expression": "A",
+            "filter": {
+              "expression": "service.name = 'observable-agent' AND name = 'llm.chat' AND retry.reason = 'response_dropped'"
+            },
+            "functions": [],
+            "groupBy": [],
+            "having": { "expression": "" },
+            "legend": "dropped attempts",
+            "limit": null,
+            "orderBy": [],
+            "queryName": "A",
+            "source": "",
+            "stepInterval": null
+          }
+        ],
+        "queryFormulas": [],
+        "queryTraceOperator": []
+      }
+    },
+    "op": ">",
+    "target": 0,
+    "matchType": "1",
+    "selectedQueryName": "A",
+    "targetUnit": ""
+  },
+  "labels": { "severity": "warning" },
+  "annotations": {
+    "summary": "The agent is retrying LLM calls",
+    "description": "llm.chat spans with retry.reason=response_dropped are appearing: the agent burned tokens on a response it discarded, then re-ran inference. This is the retry tax."
+  }
+}

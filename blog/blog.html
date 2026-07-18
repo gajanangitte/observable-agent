@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I gave a local Llama agent OpenTelemetry eyes: tracing tokens, cost, and the latency tail in self-hosted SigNoz</title>
+<style>
+  :root {{ color-scheme: light; }}
+  body {{ margin:0; background:#f6f7f9; color:#1f2328;
+    font:17px/1.7 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }}
+  .wrap {{ max-width:760px; margin:0 auto; padding:48px 24px 96px; }}
+  h1 {{ font-size:2.1rem; line-height:1.2; margin:.2em 0 .4em; letter-spacing:-.02em; }}
+  h2 {{ font-size:1.5rem; margin:2.2em 0 .6em; letter-spacing:-.01em;
+    padding-top:.4em; border-top:1px solid #e6e8eb; }}
+  h3 {{ font-size:1.15rem; margin:1.8em 0 .5em; }}
+  p,li {{ color:#30363d; }}
+  a {{ color:#0969da; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
+  blockquote {{ margin:1.4em 0; padding:.6em 1.1em; border-left:4px solid #d0a215;
+    background:#fbf8ec; border-radius:6px; color:#4b4636; font-style:italic; }}
+  code {{ font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.86em;
+    background:#eff1f3; padding:.15em .4em; border-radius:5px; }}
+  pre {{ background:#0d1117; color:#e6edf3; padding:16px 18px; border-radius:10px;
+    overflow:auto; font-size:.82rem; line-height:1.55; }}
+  pre code {{ background:none; padding:0; color:inherit; }}
+  img {{ max-width:100%; height:auto; border:1px solid #d0d7de; border-radius:10px;
+    box-shadow:0 6px 24px rgba(31,35,40,.10); margin:1.2em 0; display:block; }}
+  table {{ border-collapse:collapse; width:100%; margin:1.2em 0; font-size:.92rem; }}
+  th,td {{ border:1px solid #d0d7de; padding:8px 12px; text-align:left; }}
+  th {{ background:#eff1f3; }}
+  hr {{ border:none; border-top:1px solid #e6e8eb; margin:2.4em 0; }}
+  .meta {{ color:#8b949e; font-size:.85rem; margin-bottom:2.2em; }}
+</style></head>
+<body><div class="wrap">
+<div class="meta">Agents of SigNoz hackathon · Early-Win blog · preview</div>
+<h1 id="i-gave-a-local-llama-agent-opentelemetry-eyes">I gave a local Llama agent OpenTelemetry eyes</h1>
+<blockquote>
+<p>"If you can't observe your AI agents, you don't own them."</p>
+</blockquote>
+<p>That line from the <em>Agents of SigNoz</em> hackathon stuck with me, so I tested it literally. I took a small SRE "sidekick" agent running on a <strong>local Llama model</strong> — no OpenAI bill, no vendor dashboard — wired it up with <strong>OpenTelemetry</strong>, and pointed it at a <strong>self-hosted SigNoz</strong>. Then I watched what an agent actually does when you ask it a question.</p>
+<p>The short version: the tool calls were never the problem. <strong>One LLM call was 84.5% of the entire request.</strong> I only know that number because the agent had eyes.</p>
+<p>This post is the narrow, practical walkthrough: self-host SigNoz, instrument an agent with the OpenTelemetry <strong>GenAI semantic conventions</strong>, and read the trace, tokens, cost, and latency tail that come out the other side.</p>
+<hr />
+<h2 id="the-stack-all-local-all-free">The stack (all local, all free)</h2>
+<table>
+<thead>
+<tr>
+<th>Piece</th>
+<th>What I used</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Observability backend</td>
+<td><strong>SigNoz v0.133</strong> (self-hosted via Foundry)</td>
+</tr>
+<tr>
+<td>Telemetry</td>
+<td><strong>OpenTelemetry Python SDK</strong> (manual spans + metrics + logs)</td>
+</tr>
+<tr>
+<td>Transport</td>
+<td>OTLP/HTTP → <code>:4318</code></td>
+</tr>
+<tr>
+<td>LLM</td>
+<td><strong>Ollama</strong> running <code>llama3.2:1b</code> and <code>llama3.2:3b</code> on CPU</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td>~200 lines of Python: a tool-calling loop</td>
+</tr>
+</tbody>
+</table>
+<p>Heads-up if you're following an old tutorial: the <code>install.sh</code> script and the bundled <code>docker-compose</code> files are <strong>deprecated as of v0.130</strong>. SigNoz now installs through <strong>Foundry</strong>, a small "observability-stack-as-code" CLI. It's still three steps:</p>
+<pre><code class="language-bash"># 1. install the Foundry CLI
+curl -fsSL https://signoz.io/foundry.sh | bash
+
+# 2. a five-line casting.yaml (this is the whole file)
+#   apiVersion: v1alpha1
+#   kind: Installation
+#   metadata: { name: signoz }
+#   spec: { deployment: { flavor: compose, mode: docker } }
+
+# 3. deploy
+foundryctl cast -f casting.yaml
+</code></pre>
+<p>I'm on Windows, so I ran everything inside <strong>WSL 2 with Docker Engine</strong> — not Docker Desktop. That's not a personal quirk: SigNoz's own docs warn that ClickHouse Keeper crash-loops (exit 139, segfaults) under Docker Desktop's VM layer on Windows. I hit exactly that before switching, so consider this your warning too.</p>
+<p>A minute later the UI is on <code>http://localhost:8080</code>, and its onboarding checklist lights up green the moment your app starts sending data:</p>
+<p><img alt="SigNoz home — logs, traces, and metrics ingestion all active" src="shots/01_home.png" /></p>
+<p>Three ticks — <strong>logs, traces, and metrics ingestion active</strong> — and my service <code>observable-agent</code> shows up in the services list. That's the whole "did my telemetry land?" question answered in one screen.</p>
+<hr />
+<h2 id="the-agent-a-tiny-sre-sidekick">The agent: a tiny SRE sidekick</h2>
+<p>The agent answers on-call questions like <em>"Is checkout healthy?"</em> or <em>"What's my error budget?"</em>. It has four tools:</p>
+<ul>
+<li><code>get_service_health(service)</code></li>
+<li><code>list_recent_deploys(service)</code></li>
+<li><code>calculate_error_budget(slo_percent, actual_error_rate)</code></li>
+<li><code>search_runbook(topic)</code></li>
+</ul>
+<p>It runs the classic agent loop: send the question + tool schemas to the model, let the model pick tools, run them, feed results back, and let the model write the final answer. Nothing exotic — which is exactly the point. This is the shape of most "AI agents" in production.</p>
+<p>What makes it <em>observable</em> is a three-level span tree:</p>
+<pre><code>agent.invoke        (SERVER)   ← one per user question
+└─ llm.chat         (CLIENT)   ← each model round-trip
+└─ tool.&lt;name&gt;      (INTERNAL) ← each tool execution
+</code></pre>
+<hr />
+<h2 id="instrumenting-the-llm-call-the-right-way">Instrumenting the LLM call the "right" way</h2>
+<p>OpenTelemetry has <strong>GenAI semantic conventions</strong> — a standard set of <code>gen_ai.*</code> attributes so any backend can understand an LLM call. Instead of inventing my own keys, I set the standard ones on each <code>llm.chat</code> span:</p>
+<pre><code class="language-python">with tracer.start_as_current_span(&quot;llm.chat&quot;, kind=SpanKind.CLIENT) as span:
+    span.set_attribute(&quot;gen_ai.system&quot;, &quot;ollama&quot;)
+    span.set_attribute(&quot;gen_ai.operation.name&quot;, &quot;chat&quot;)
+    span.set_attribute(&quot;gen_ai.request.model&quot;, model)
+
+    resp = client.chat.completions.create(model=model, messages=msgs, tools=TOOL_SCHEMAS)
+
+    span.set_attribute(&quot;gen_ai.response.finish_reason&quot;, resp.choices[0].finish_reason)
+    # one helper writes tokens + cost to BOTH the span and the metrics:
+    record_llm(model, resp.usage.prompt_tokens, resp.usage.completion_tokens, latency_ms)
+</code></pre>
+<p>That <code>record_llm</code> helper is where the trick lives — the same numbers land on the span <em>and</em> on OpenTelemetry metrics in one place:</p>
+<pre><code class="language-python">def record_llm(model, in_tok, out_tok, latency_ms):
+    cost = cost_usd(model, in_tok, out_tok)
+    attrs = {&quot;gen_ai.request.model&quot;: model, &quot;gen_ai.system&quot;: &quot;ollama&quot;}
+    token_counter.add(in_tok,  {**attrs, &quot;gen_ai.token.type&quot;: &quot;input&quot;})
+    token_counter.add(out_tok, {**attrs, &quot;gen_ai.token.type&quot;: &quot;output&quot;})
+    cost_counter.add(cost, attrs)
+    llm_latency.record(latency_ms, attrs)
+    span = trace.get_current_span()                 # the live llm.chat span
+    span.set_attribute(&quot;gen_ai.usage.input_tokens&quot;,  in_tok)
+    span.set_attribute(&quot;gen_ai.usage.output_tokens&quot;, out_tok)
+    span.set_attribute(&quot;gen_ai.usage.cost_usd&quot;,      round(cost, 6))
+</code></pre>
+<p>So one call feeds two questions: <em>"what happened in this exact request?"</em> (the span) and <em>"what's happening across all of them?"</em> (the metrics <code>gen_ai.client.token.usage</code>, <code>gen_ai.client.cost</code>, <code>gen_ai.client.operation.duration</code>).</p>
+<p>That's it. No agent framework, no auto-instrumentation magic — just the standard conventions, so SigNoz knows exactly what it's looking at.</p>
+<blockquote>
+<p><strong>A note on the spec (I checked the docs, as the guide advises).</strong> The OpenTelemetry GenAI semantic conventions are at <em>Development</em> stability and recently moved to <a href="https://github.com/open-telemetry/semantic-conventions-genai">their own repo</a>. A few honest deviations in the code above: <code>gen_ai.system</code> is now <strong>deprecated in favour of <code>gen_ai.provider.name</code></strong>; <code>gen_ai.usage.input_tokens</code>/<code>output_tokens</code> are the current names (the <code>prompt_tokens</code>/<code>completion_tokens</code> you see are the <em>OpenAI SDK's</em> field names, which I map onto the span); and <code>gen_ai.response.finish_reasons</code> is officially <strong>plural</strong> (a string array). <code>gen_ai.usage.total_tokens</code>, <code>gen_ai.usage.cost_usd</code>, and the <code>gen_ai.client.cost</code> metric are <strong>my own extensions</strong> — the spec has no cost signal yet. The spec also models <code>gen_ai.client.token.usage</code> as a Histogram and <code>gen_ai.client.operation.duration</code> in seconds; I kept a counter and milliseconds for readability. And per the <a href="https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md">span guide</a> the recommended span name is <code>{operation} {model}</code> (e.g. <code>chat llama3.2:1b</code>) — I use <code>llm.chat</code> because it reads cleaner in a waterfall.</p>
+</blockquote>
+<hr />
+<h2 id="reading-the-trace-where-did-the-time-actually-go">Reading the trace: where did the time actually go?</h2>
+<p>Here's a single question — <em>"Inventory feels slow. Pull its health, recent deploys, and the right runbook."</em> — as one distributed trace in SigNoz:</p>
+<p><img alt="Trace waterfall: agent.invoke → llm.chat → 3 tools → llm.chat" src="shots/02_trace_waterfall.png" /></p>
+<p>Six spans, zero errors. Read top to bottom:</p>
+<ol>
+<li><code>agent.invoke</code> — the whole request, <strong>1.83 min</strong>.</li>
+<li><code>llm.chat</code> (<strong>17 s</strong>) — the model reads the question and decides which tools to call.</li>
+<li><code>tool.get_service_health</code>, <code>tool.list_recent_deploys</code>, <code>tool.search_runbook</code> — three tools, each <strong>~1 ms</strong>.</li>
+<li><code>llm.chat</code> (<strong>1.54 min</strong>) — the model synthesizes the final answer from the tool output.</li>
+</ol>
+<p>The tools are a rounding error. The first LLM call is quick. The <strong>final synthesis call is the whole story</strong> — and SigNoz labels it for you when you click the span:</p>
+<p><img alt="Span detail: gen_ai attributes, token counts, cost, and 84.51% of exec time" src="shots/04_span_attributes.png" /></p>
+<p><strong>1.54 mins — 84.51% of total exec time.</strong> Right there in the drawer are the GenAI attributes I set: <code>gen_ai.request.model = llama3.2:1b</code>, <code>input_tokens = 286</code>, <code>output_tokens = 120</code>, <code>total_tokens = 406</code>, <code>gen_ai.usage.cost_usd</code>, and <code>finish_reason = stop</code>. SigNoz even captured the completion text as a span event.</p>
+<p>This is the payoff of the semantic conventions: I didn't build a custom "LLM view." I set standard attributes, and the generic trace UI became an LLM debugger. The lesson — <em>the long-context generation, not the tools, owns your p95</em> — is the kind of thing you'd never guess from logs alone.</p>
+<hr />
+<h2 id="from-one-trace-to-a-fleet-the-dashboard">From one trace to a fleet: the dashboard</h2>
+<p>One trace is a debugging tool. To <em>own</em> the agent I need aggregates, so I built an <strong>LLM &amp; Agent Observability</strong> dashboard straight from the same span attributes:</p>
+<p><img alt="LLM &amp; Agent Observability dashboard" src="shots/05_dashboard.png" /></p>
+<p>Across a short load run of varied SRE questions:</p>
+<ul>
+<li><strong>20 LLM calls · 6,064 input tokens · 1,439 output tokens · $0.00075 total cost</strong></li>
+<li><strong>Token usage over time</strong>, split into input vs. output — input dominates because every tool result is re-fed into the prompt.</li>
+<li><strong>LLM latency p95/p99 by model</strong> — the tail climbs past <strong>1.6 min</strong> on CPU, which is precisely the cold, uncomfortable truth you want on a dashboard instead of in a user complaint.</li>
+<li><strong>Span latency p95 by operation</strong> — the single clearest panel on the board: <code>agent.invoke</code> and <code>llm.chat</code> ride high while every <code>tool.*</code> span sits pinned to the floor. The waterfall lesson, now true across the whole fleet.</li>
+</ul>
+<p>About that cost: locally it's essentially zero (I compute it from a per-model price table). But the instrumentation is <strong>identical</strong> to what you'd use against a paid API. Point the provider at <code>openai</code> or <code>anthropic</code> instead of <code>ollama</code> and the same dashboard is now watching real dollars — <em>before</em> the invoice does.</p>
+<hr />
+<h2 id="my-favorite-signoz-feature">My favorite SigNoz feature</h2>
+<p>The <strong>trace → span drawer</strong> won me over. Because SigNoz speaks the OpenTelemetry GenAI conventions natively, a plain span turned into a per-call LLM inspector — model, tokens, cost, finish reason, and the completion event — with <strong>zero custom UI</strong>. Add the "% of total exec time" on each span and root-causing a slow agent stops being guesswork.</p>
+<p>Runner-up: the metrics query builder let me group the same <code>gen_ai.*</code> data by model and token type without writing SQL.</p>
+<hr />
+<h2 id="honest-takeaways">Honest takeaways</h2>
+<ul>
+<li><strong>Instrument the standard, not the vendor.</strong> OpenTelemetry GenAI attributes made a generic backend understand my agent. No lock-in, no framework.</li>
+<li><strong>Agents hide their latency in one span.</strong> My tools were ~1 ms; a single synthesis call was 84.5%. You cannot fix what you cannot see.</li>
+<li><strong>Self-hosting SigNoz is a five-line <code>casting.yaml</code> and one <code>foundryctl cast</code>.</strong> Traces, metrics, and logs in one place, on my laptop, for free.</li>
+<li><strong>Local models make great observability test rigs.</strong> CPU inference is slow — which means the interesting tail <em>exists</em>, so you actually have something to observe.</li>
+</ul>
+<p>Next, I'm turning this into a Track 01 project: a self-healing SRE sidekick that reads its own SigNoz traces to decide what to do. But that's another post.</p>
+<p><em>Everything here — the agent, the OpenTelemetry wiring, and the dashboard JSON — is reproducible; the commands above are the ones I actually ran.</em></p>
+</div></body></html>

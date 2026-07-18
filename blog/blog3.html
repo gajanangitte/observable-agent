@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I gave my local Llama agent the SigNoz MCP server and asked it to debug itself</title>
+<style>
+  :root {{ color-scheme: light; }}
+  body {{ margin:0; background:#f6f7f9; color:#1f2328;
+    font:17px/1.7 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }}
+  .wrap {{ max-width:760px; margin:0 auto; padding:48px 24px 96px; }}
+  h1 {{ font-size:2.1rem; line-height:1.2; margin:.2em 0 .4em; letter-spacing:-.02em; }}
+  h2 {{ font-size:1.5rem; margin:2.2em 0 .6em; letter-spacing:-.01em;
+    padding-top:.4em; border-top:1px solid #e6e8eb; }}
+  h3 {{ font-size:1.15rem; margin:1.8em 0 .5em; }}
+  p,li {{ color:#30363d; }}
+  a {{ color:#0969da; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
+  blockquote {{ margin:1.4em 0; padding:.6em 1.1em; border-left:4px solid #d0a215;
+    background:#fbf8ec; border-radius:6px; color:#4b4636; font-style:italic; }}
+  code {{ font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.86em;
+    background:#eff1f3; padding:.15em .4em; border-radius:5px; }}
+  pre {{ background:#0d1117; color:#e6edf3; padding:16px 18px; border-radius:10px;
+    overflow:auto; font-size:.82rem; line-height:1.55; }}
+  pre code {{ background:none; padding:0; color:inherit; }}
+  img {{ max-width:100%; height:auto; border:1px solid #d0d7de; border-radius:10px;
+    box-shadow:0 6px 24px rgba(31,35,40,.10); margin:1.2em 0; display:block; }}
+  table {{ border-collapse:collapse; width:100%; margin:1.2em 0; font-size:.92rem; }}
+  th,td {{ border:1px solid #d0d7de; padding:8px 12px; text-align:left; }}
+  th {{ background:#eff1f3; }}
+  hr {{ border:none; border-top:1px solid #e6e8eb; margin:2.4em 0; }}
+  .meta {{ color:#8b949e; font-size:.85rem; margin-bottom:2.2em; }}
+</style></head>
+<body><div class="wrap">
+<div class="meta">Agents of SigNoz hackathon · blog #3 (flagship) · preview</div>
+<h1 id="the-agent-that-reads-its-own-traces">The agent that reads its own traces</h1>
+<p>Observability is something we do <em>to</em> our agents. We instrument them, then a human opens SigNoz and reads the waterfall. But SigNoz now ships an <strong>MCP server</strong> — a <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> interface that turns "search traces", "aggregate latency", "list services" into tools an LLM can call. So the console isn't human-only anymore. Which raises a fun question:</p>
+<blockquote>
+<p>What if the agent read its <strong>own</strong> traces and debugged <strong>itself</strong>?</p>
+</blockquote>
+<p>So I connected my agent — a tiny <code>qwen2.5:3b</code> running on <strong>CPU</strong> via Ollama, no GPU, no cloud — to the SigNoz MCP server and asked it one question: <strong>"Why are you slow?"</strong> It called an MCP tool, pulled its own p95 latency out of SigNoz, and answered:</p>
+<blockquote>
+<p><em>"The llm.chat model calls have a p95 latency of approximately </em><em>101,375.3 ms</em><em>, while the tool.</em> calls have a p95 of about <strong>1.5 ms</strong>. The model call is roughly <strong>67,584 times slower</strong> than the tool call... focus on optimizing the llm.chat model calls or consider a more efficient alternative."*</p>
+</blockquote>
+<p>That is the agent re-discovering, from the <em>inside</em>, the exact lesson I found by hand in <a href="BLOG_EYES">my first post</a> (one LLM call was 84.5% of a request). Only this time I didn't read the trace. It did.</p>
+<p>Everything is local and free: <strong>SigNoz v0.133</strong>, the <strong>SigNoz MCP server</strong>, and <strong>Ollama</strong> on CPU. Here's how it works — and the two things that actually made a tiny model reliable over MCP.</p>
+<hr />
+<h2 id="the-loop-an-agent-that-observes-the-observer">The loop: an agent that observes the observer</h2>
+<p>The agent already emitted OpenTelemetry traces (<code>agent.invoke → llm.chat → tool.*</code>). To let it read them back, I gave it a second entrypoint with a different toolset: instead of the fake SRE tools, it gets <strong>SigNoz MCP tools</strong>, and the whole session is rooted in an <code>agent.introspect</code> span. That means the self-debugging run is <em>itself</em> a trace you can open in SigNoz — the observer, observed:</p>
+<p><img alt="The self-debug trace: agent.introspect calls llm.chat, then a tool that wraps a real mcp.signoz_aggregate_traces call, then a final llm.chat — 5 spans, 0 errors" src="shots3/01_introspect_trace.png" /></p>
+<p>Top to bottom: <code>agent.introspect</code> → <code>llm.chat</code> (the model decides what to look at) → <code>tool.latency_by_operation</code> → <strong><code>mcp.signoz_aggregate_traces</code></strong> (a real MCP call out to the server) → <code>llm.chat</code> (the diagnosis). The agent made an MCP request to SigNoz <em>as a step inside its own trace</em>.</p>
+<p>The MCP server itself is one binary in HTTP mode:</p>
+<pre><code class="language-bash">SIGNOZ_URL=http://localhost:8080 SIGNOZ_API_KEY=$KEY \
+  TRANSPORT_MODE=http MCP_SERVER_PORT=8000 ./signoz-mcp-server
+# -&gt; listening on :8000/mcp, 41 tools registered
+</code></pre>
+<p>And the client bridge is deliberately tiny — the agent loop is synchronous, so each tool call opens a short-lived streamable-HTTP session:</p>
+<pre><code class="language-python">from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+class SigNozMCP:
+    def call_tool(self, name, args):
+        async def run():
+            async with streamablehttp_client(self.url) as (r, w, _):
+                async with ClientSession(r, w) as s:
+                    await s.initialize()
+                    return await s.call_tool(name, args or {})
+        result = asyncio.run(run())
+        return &quot;\n&quot;.join(c.text for c in result.content if c.type == &quot;text&quot;)
+</code></pre>
+<p>Every tool the model calls is wrapped in its own <code>mcp.*</code> span, so the MCP round-trip shows up in the trace with the exact request it made:</p>
+<pre><code class="language-python">def _mcp_call(mcp, tool_name, args):
+    with tracer.start_as_current_span(f&quot;mcp.{tool_name}&quot;, kind=SpanKind.CLIENT) as span:
+        span.set_attribute(&quot;mcp.tool.name&quot;, tool_name)
+        span.set_attribute(&quot;mcp.method&quot;, &quot;tools/call&quot;)
+        span.set_attribute(&quot;mcp.transport&quot;, &quot;streamable_http&quot;)
+        span.set_attribute(&quot;mcp.request.args&quot;, json.dumps(args))
+        return json.loads(mcp.call_tool(tool_name, args))
+</code></pre>
+<p>Click that span and there's the proof it was a genuine MCP protocol call — and that the agent was querying <strong>itself</strong>:</p>
+<p><img alt="Span details for mcp.signoz_aggregate_traces: mcp.method=tools/call, mcp.transport=streamable_http, mcp.server.url=localhost:8000/mcp, and request args filtering service.name='observable-agent'" src="shots3/02_mcp_span_drawer.png" /></p>
+<p><code>mcp.tool.name: signoz_aggregate_traces</code>, <code>mcp.method: tools/call</code>, and the args: <em>aggregate p95 of <code>duration_nano</code>, grouped by span name, filtered to <code>service.name = 'observable-agent'</code>.</em> The agent asked SigNoz for its own latency profile.</p>
+<hr />
+<h2 id="honest-problem-1-a-3b-model-cant-drive-41-raw-mcp-tools">Honest problem #1: a 3B model can't drive 41 raw MCP tools</h2>
+<p>Here's the part the demos skip. The SigNoz MCP server exposes <strong>41 tools</strong>, and the good ones take rich arguments — nanosecond durations, free-form SigNoz filter expressions, <code>groupBy</code> keys, relative time ranges. That's fine for Claude. It is <em>not</em> fine for a 3B model on CPU. My first attempt handed the model the raw tools. <code>llama3.2:3b</code> didn't even emit a valid tool call — it printed one as text:</p>
+<pre><code>A: {&quot;name&quot;:&quot;latency_by_operation&quot;,&quot;parameters:{}}   # &lt;- malformed, not a real tool call
+</code></pre>
+<p>Two fixes made it reliable:</p>
+<ol>
+<li><strong>A tool-calling model.</strong> <code>llama3.2:3b</code> fumbles the function-calling format; <code>qwen2.5:3b</code> (same size, same CPU) gets it right. Model choice matters more than model size here.</li>
+<li><strong>Curated, argument-free tools.</strong> Instead of exposing 41 tools with complex schemas, I expose <strong>three</strong> with no arguments — <code>list_my_services</code>, <code>latency_by_operation</code>, <code>find_slowest_traces</code> — each of which pins the correct arguments and calls a real MCP tool under the hood. The model picks <em>what to look at</em>; the wrapper handles <em>how to ask</em>.</li>
+</ol>
+<pre><code class="language-python">def latency_by_operation(**_):
+    &quot;&quot;&quot;MCP: signoz_aggregate_traces -&gt; p95 latency per operation.&quot;&quot;&quot;
+    parsed = _mcp_call(mcp, &quot;signoz_aggregate_traces&quot;, {
+        &quot;aggregation&quot;: &quot;p95&quot;, &quot;aggregateOn&quot;: &quot;duration_nano&quot;,
+        &quot;groupBy&quot;: &quot;name&quot;, &quot;filter&quot;: f&quot;service.name = '{SERVICE}'&quot;,
+        &quot;timeRange&quot;: &quot;6h&quot;,
+    })
+    # ...trim the big JSON down to [{operation, p95_ms}] the model can reason about
+</code></pre>
+<p>This is the pattern for small models + MCP: <strong>don't expose the raw firehose; expose a few intention-shaped tools and let the server do the heavy lifting.</strong></p>
+<hr />
+<h2 id="honest-problem-2-small-models-hallucinate-numbers-so-let-signoz-do-the-math">Honest problem #2: small models hallucinate numbers, so let SigNoz do the math</h2>
+<p>Even with a clean tool result, <code>qwen2.5:3b</code>'s first diagnosis invented figures out of thin air — "llm.chat p95 is 200ms, tools are 300ms" — numbers that appear <em>nowhere</em> in the data. A 3B model is a bad calculator and a worse transcriber of long decimals.</p>
+<p>The fix isn't a bigger model — it's <strong>the right division of labour</strong>. Percentile math is exactly what SigNoz's aggregation is <em>for</em>, so I compute the comparison in the tool and hand the model a factual, hard-to-hallucinate headline. The model's job is to orchestrate and interpret, not to do nanosecond arithmetic in its head:</p>
+<pre><code class="language-python">headline = (f&quot;llm.chat p95 = {llm_ms} ms; slowest tool ({tool_name}) &quot;
+            f&quot;p95 = {tool_ms} ms; the model call is ~{ratio}x slower than the tool call.&quot;)
+return {&quot;headline&quot;: headline, &quot;operations&quot;: ops}
+</code></pre>
+<p>With that grounding, the diagnosis became correct and specific — and you can see the exact numbers it read, captured in the tool span's result attribute:</p>
+<p><img alt="Span details for tool.latency_by_operation: tool.result shows llm.chat p95=101375.3ms, slowest tool 1.5ms, ~67584x slower, plus the full per-operation list" src="shots3/03_tool_result.png" /></p>
+<p><code>llm.chat</code> p95 <strong>101,375.3 ms</strong> vs the slowest real tool at <strong>1.5 ms</strong>. The agent read that and concluded, correctly, that it is ~67,000× bottlenecked on the model — not its logic, not its tools.</p>
+<hr />
+<h2 id="the-observer-effect-is-real-and-its-in-the-trace">The observer effect is real (and it's in the trace)</h2>
+<p>One honest wrinkle: the introspection runs are themselves slow (CPU inference), so they <strong>pollute the very data the agent reads</strong>. The first version of my latency tool proudly reported that <code>agent.introspect</code> was the slowest operation — because it was measuring itself. The <code>mcp.*</code> and telemetry-reading <code>tool.*</code> spans, dominated by the SigNoz round-trip, leaked into the "tool" numbers too and shrank the ratio from ~67,000× to a meaningless 12×.</p>
+<p>The fix was to exclude the introspection scaffolding (<code>agent.introspect</code>, <code>mcp.*</code>, the three reader tools) from the comparison so the agent reasons about its real request-serving workload. But it's a genuine lesson worth stating plainly: <strong>when an agent observes itself, it perturbs what it observes.</strong> You can see it happen span by span.</p>
+<hr />
+<h2 id="why-this-is-a-different-corner-of-mcp">Why this is a different corner of MCP</h2>
+<p>SigNoz's own MCP examples — reasonably — show a frontier cloud model (Claude, Cursor) querying a production stack. This is the opposite extreme on purpose:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Typical MCP demo</th>
+<th>This</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Model</td>
+<td>Cloud frontier (Claude/GPT)</td>
+<td><code>qwen2.5:3b</code>, <strong>CPU-only, local</strong></td>
+</tr>
+<tr>
+<td>Target</td>
+<td>Someone else's production</td>
+<td>Its <strong>own</strong> traces</td>
+</tr>
+<tr>
+<td>Network</td>
+<td>SaaS</td>
+<td>Fully <strong>offline</strong></td>
+</tr>
+<tr>
+<td>Point</td>
+<td>Human asks about a service</td>
+<td>Agent <strong>debugs itself</strong></td>
+</tr>
+</tbody>
+</table>
+<p>None of it is cloud-shaped. A 3-billion-parameter model on a laptop CPU used a standards-based protocol to read its own OpenTelemetry data out of a self-hosted backend and reached a true conclusion about its own performance. That is a self-observing agent, built from open parts.</p>
+<h2 id="whats-honest-about-this">What's honest about this</h2>
+<p>The model doesn't do the percentile math and I curated its tools — that's not cheating, it's system design: the LLM orchestrates and interprets, SigNoz computes, MCP is the contract between them. What's completely real is the loop: the agent <em>chose</em> to look at latency, issued a real <code>tools/call</code> to the SigNoz MCP server, read numbers measured from its own spans, and diagnosed itself. And it did it on hardware you already own.</p>
+<p>The takeaway from my <a href="BLOG_EYES">first</a> and <a href="BLOG_RETRYTAX">second</a> posts was "you can't own an agent you can't observe." MCP adds a sequel: once the telemetry is an agent-callable API, the agent can observe <em>itself</em> — and the next step, closing the loop from <em>diagnose</em> to <em>act</em>, is suddenly a very short walk.</p>
+<p><em>Stack: SigNoz v0.133 (self-hosted, WSL2 + Docker Engine), SigNoz MCP server (HTTP/streamable transport, 41 tools), OpenTelemetry Python SDK, Ollama <code>qwen2.5:3b</code> on CPU. Introspection agent + MCP bridge + curated tools: ~200 lines of Python. Built for the WeMakeDevs × SigNoz "Agents of SigNoz" hackathon.</em></p>
+</div></body></html>

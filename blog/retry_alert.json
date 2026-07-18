@@ -1,0 +1,44 @@
+{
+  "alert": "Agent Retry Tax: LLM responses being retried",
+  "alertType": "METRIC_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "evalWindow": "5m0s",
+  "frequency": "1m0s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "builder",
+      "panelType": "graph",
+      "builderQueries": {
+        "A": {
+          "queryName": "A",
+          "dataSource": "metrics",
+          "aggregateAttribute": {
+            "key": "agent.retry.count",
+            "dataType": "float64",
+            "type": "Sum",
+            "isColumn": true
+          },
+          "timeAggregation": "rate",
+          "spaceAggregation": "sum",
+          "aggregateOperator": "rate",
+          "expression": "A",
+          "disabled": false,
+          "stepInterval": 60,
+          "filters": { "op": "AND", "items": [] },
+          "groupBy": [],
+          "legend": "retries/sec",
+          "reduceTo": "sum"
+        }
+      }
+    },
+    "op": ">",
+    "target": 0,
+    "matchType": "1",
+    "targetUnit": ""
+  },
+  "labels": { "severity": "warning" },
+  "annotations": {
+    "summary": "The agent is retrying LLM calls",
+    "description": "agent.retry.count is rising: the agent is re-running LLM inference after dropped/failed responses. Every retry burns tokens and latency (the retry tax)."
+  }
+}

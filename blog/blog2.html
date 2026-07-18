@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Retry Tax: what a local Llama agent's silent retries actually cost — measured in self-hosted SigNoz</title>
+<style>
+  :root {{ color-scheme: light; }}
+  body {{ margin:0; background:#f6f7f9; color:#1f2328;
+    font:17px/1.7 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }}
+  .wrap {{ max-width:760px; margin:0 auto; padding:48px 24px 96px; }}
+  h1 {{ font-size:2.1rem; line-height:1.2; margin:.2em 0 .4em; letter-spacing:-.02em; }}
+  h2 {{ font-size:1.5rem; margin:2.2em 0 .6em; letter-spacing:-.01em;
+    padding-top:.4em; border-top:1px solid #e6e8eb; }}
+  h3 {{ font-size:1.15rem; margin:1.8em 0 .5em; }}
+  p,li {{ color:#30363d; }}
+  a {{ color:#0969da; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
+  blockquote {{ margin:1.4em 0; padding:.6em 1.1em; border-left:4px solid #d0a215;
+    background:#fbf8ec; border-radius:6px; color:#4b4636; font-style:italic; }}
+  code {{ font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.86em;
+    background:#eff1f3; padding:.15em .4em; border-radius:5px; }}
+  pre {{ background:#0d1117; color:#e6edf3; padding:16px 18px; border-radius:10px;
+    overflow:auto; font-size:.82rem; line-height:1.55; }}
+  pre code {{ background:none; padding:0; color:inherit; }}
+  img {{ max-width:100%; height:auto; border:1px solid #d0d7de; border-radius:10px;
+    box-shadow:0 6px 24px rgba(31,35,40,.10); margin:1.2em 0; display:block; }}
+  table {{ border-collapse:collapse; width:100%; margin:1.2em 0; font-size:.92rem; }}
+  th,td {{ border:1px solid #d0d7de; padding:8px 12px; text-align:left; }}
+  th {{ background:#eff1f3; }}
+  hr {{ border:none; border-top:1px solid #e6e8eb; margin:2.4em 0; }}
+  .meta {{ color:#8b949e; font-size:.85rem; margin-bottom:2.2em; }}
+</style></head>
+<body><div class="wrap">
+<div class="meta">Agents of SigNoz hackathon · blog #2 · preview</div>
+<h1 id="the-retry-tax">The Retry Tax</h1>
+<p>Every "AI agent" retries. The model returns malformed JSON, a guardrail rejects the answer, a tool-call schema doesn't validate, a request times out — so the agent quietly runs the model again. That retry is usually invisible. It doesn't throw. The user still gets an answer. But you paid for the inference <strong>twice</strong>: twice the tokens, twice the latency, twice the GPU-seconds. I call it the <strong>retry tax</strong>, and until you trace it, it's a silent line item on your bill.</p>
+<p>In an <a href="BLOG_EYES">earlier post</a> I gave a small local-Llama SRE agent OpenTelemetry eyes and found one LLM call was 84.5% of a request. This post is the follow-up I actually care about: I made that agent <strong>retry once</strong>, deliberately, and measured the tax in <strong>self-hosted SigNoz</strong>. One wasted call — a response the agent generated and then threw away — turned out to be <strong>34% of the request's wall-clock time</strong>. I only know that because the trace shows the work that got discarded.</p>
+<p>Everything here is local and free: <strong>SigNoz v0.133</strong>, <strong>Ollama</strong> running <code>llama3.2:1b</code> on CPU, and ~200 lines of instrumented Python. No cloud model, no vendor dashboard.</p>
+<hr />
+<h2 id="the-failure-i-wanted-to-see">The failure I wanted to see</h2>
+<p>Real retries have messy causes. To study the <em>cost</em> of a retry without the noise of <em>why</em>, I injected a clean, deterministic fault: <strong>drop the first completed response exactly once per request.</strong> The key word is <em>completed</em> — the model already ran, the tokens were already spent. Then the agent has to infer again. That's the honest shape of a retry: you don't get the tokens back.</p>
+<p>The whole fault is four environment-driven knobs in <code>config.py</code>:</p>
+<pre><code class="language-python"># EXPERIMENT_ID tags every span + metric so &quot;control&quot; and &quot;chaos&quot; cohorts are
+# directly comparable in SigNoz. CHAOS_DROP_RESPONSE_ONCE drops the first
+# completed response of each request, forcing exactly one retry.
+EXPERIMENT_ID   = os.getenv(&quot;EXPERIMENT_ID&quot;, &quot;&quot;)
+CHAOS_DROP_ONCE = os.getenv(&quot;CHAOS_DROP_RESPONSE_ONCE&quot;, &quot;0&quot;) == &quot;1&quot;
+LLM_MAX_ATTEMPTS = int(os.getenv(&quot;LLM_MAX_ATTEMPTS&quot;, &quot;1&quot;))
+RETRY_BACKOFF_MS = int(os.getenv(&quot;RETRY_BACKOFF_MS&quot;, &quot;250&quot;))
+</code></pre>
+<p>The agent's LLM round-trip becomes an attempt loop. Each attempt is its own <code>llm.chat</code> span, so a retry literally <em>duplicates</em> the span inside the same trace — the retry tax made visible:</p>
+<pre><code class="language-python">def _chat(self, messages):
+    max_attempts = max(config.LLM_MAX_ATTEMPTS, 2 if config.CHAOS_DROP_ONCE else 1)
+    for attempt in range(1, max_attempts + 1):
+        with tracer.start_as_current_span(&quot;llm.chat&quot;, kind=SpanKind.CLIENT) as span:
+            span.set_attribute(&quot;llm.attempt&quot;, attempt)
+            resp = self.client.chat.completions.create(...)   # inference runs here
+            in_tok  = resp.usage.prompt_tokens
+            out_tok = resp.usage.completion_tokens
+
+            # Injected fault: drop this completed response exactly once. The
+            # tokens above were really generated, so we still record them
+            # (status=&quot;dropped&quot;) -- that is the wasted work of the retry.
+            if attempt &lt; max_attempts and getattr(self._chaos, &quot;armed&quot;, False):
+                self._chaos.armed = False
+                telemetry.record_llm(config.MODEL, in_tok, out_tok, latency_ms, &quot;dropped&quot;)
+                telemetry.record_retry(config.MODEL, &quot;response_dropped&quot;)
+                span.set_attribute(&quot;fault.injected&quot;, True)
+                span.set_attribute(&quot;retry.reason&quot;, &quot;response_dropped&quot;)
+                span.add_event(&quot;retry.scheduled&quot;,
+                               {&quot;retry.reason&quot;: &quot;response_dropped&quot;,
+                                &quot;retry.backoff_ms&quot;: backoff_ms,
+                                &quot;next.attempt&quot;: attempt + 1})
+                span.set_status(Status(StatusCode.ERROR, &quot;response dropped after completion&quot;))
+                time.sleep(backoff_ms / 1000.0)
+                continue
+            ...
+            return choice.message
+</code></pre>
+<p>Two details make this trace <em>useful</em> instead of just red:</p>
+<ol>
+<li>The dropped attempt still <strong>records its tokens</strong> (<code>status="dropped"</code>). Wasted work you don't measure isn't waste — it's a mystery.</li>
+<li><code>experiment.id</code> is stamped on every span and every metric, so a <code>control</code> run and a <code>chaos</code> run are directly comparable in the Query Builder. One counter counts the retries themselves:</li>
+</ol>
+<pre><code class="language-python">def record_retry(model, reason):
+    &quot;&quot;&quot;Count one retry (e.g. a dropped response forced the agent to re-infer).&quot;&quot;&quot;
+    _retries.add(1, _tag({&quot;gen_ai.request.model&quot;: model, &quot;retry.reason&quot;: reason}))
+</code></pre>
+<hr />
+<h2 id="two-cohorts-same-ten-questions">Two cohorts, same ten questions</h2>
+<p>I ran the identical load twice — ten SRE questions like <em>"Is checkout healthy?"</em> — and tagged them:</p>
+<pre><code class="language-bash"># control: no chaos
+EXPERIMENT_ID=rt-control python run_load.py
+
+# chaos: drop the first response of every request, once
+EXPERIMENT_ID=rt-chaos CHAOS_DROP_RESPONSE_ONCE=1 python run_load.py
+</code></pre>
+<p>Then I asked ClickHouse (SigNoz's store) what the tax was:</p>
+<table>
+<thead>
+<tr>
+<th>Metric (10 requests each)</th>
+<th><code>rt-control</code></th>
+<th><code>rt-chaos</code></th>
+<th>Δ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>llm.chat</code> spans</td>
+<td>20</td>
+<td>30</td>
+<td><strong>+50%</strong></td>
+</tr>
+<tr>
+<td>Dropped (wasted) calls</td>
+<td>0</td>
+<td>10</td>
+<td>+10</td>
+</tr>
+<tr>
+<td>Total tokens</td>
+<td>7,322</td>
+<td>11,515</td>
+<td><strong>+57%</strong></td>
+</tr>
+<tr>
+<td>— of which <em>wasted</em></td>
+<td>0</td>
+<td><strong>4,393</strong></td>
+<td>38% of all tokens</td>
+</tr>
+<tr>
+<td>Cost (USD)</td>
+<td>$0.000734</td>
+<td>$0.001153</td>
+<td><strong>+57%</strong></td>
+</tr>
+<tr>
+<td>Avg latency / request</td>
+<td>43.1 s</td>
+<td>57.0 s</td>
+<td><strong>+32%</strong></td>
+</tr>
+<tr>
+<td>p95 latency</td>
+<td>91.2 s</td>
+<td>106.1 s</td>
+<td>+16%</td>
+</tr>
+</tbody>
+</table>
+<p>One retry per request — the mildest possible retry policy — cost <strong>57% more tokens and money</strong> and made the agent <strong>a third slower</strong>. <strong>38% of every token the chaos cohort burned went to answers it threw in the bin.</strong> Now imagine a real policy of "retry up to 3× on invalid JSON" against a paid API.</p>
+<hr />
+<h2 id="reading-the-tax-in-a-single-trace">Reading the tax in a single trace</h2>
+<p>Here's one <code>chaos</code> request. The waterfall tells the whole story at a glance — <strong>5 spans, 1 error</strong>:</p>
+<p><img alt="Chaos trace: a dropped llm.chat (red), an immediate retry, the tool call, then the final answer" src="shots2/01_chaos_trace.png" /></p>
+<p>Top to bottom: <code>agent.invoke</code> → a <strong>red <code>llm.chat</code></strong> (the dropped attempt) → a second <code>llm.chat</code> (the retry) → <code>tool.get_service_health</code> → a final <code>llm.chat</code>. Two back-to-back inference spans <em>before any useful work happens</em>. In the clean cohort that first red span simply doesn't exist:</p>
+<p><img alt="Control trace: one inference per step, no retry, zero errors" src="shots2/03_control_trace.png" /></p>
+<p>Click the red span and the attributes make the waste concrete — and queryable:</p>
+<p><img alt="Span details: fault.injected=true, retry.reason=response_dropped, 431 tokens spent, a retry.scheduled event with 250ms backoff" src="shots2/02_chaos_span_drawer.png" /></p>
+<p>That single dropped call was <strong>11.12s — 34.08% of total execution time</strong>, spent <strong>431 tokens</strong> (413 in + 18 out), and carries a <code>retry.scheduled</code> <strong>span event</strong> with <code>retry.backoff_ms: 250</code> and <code>next.attempt: 2</code>. Because these are real span attributes, "show me every dropped inference and how many tokens it wasted" is just a filter: <code>name = 'llm.chat' AND retry.reason = 'response_dropped'</code>.</p>
+<hr />
+<h2 id="a-dashboard-for-the-tax">A dashboard for the tax</h2>
+<p>Same filter, turned into a <strong>Retry Tax dashboard</strong> via the SigNoz dashboards API (v5 query-builder schema, <code>dataSource: traces</code>). The <code>experiment.id</code> tag does the control-vs-chaos split for free:</p>
+<p><img alt="Retry Tax dashboard: 50 LLM calls, 11 retried, 4,827 wasted tokens; cost-by-cohort pie shows chaos $0.00115 vs control $0.00073" src="shots2/04_retrytax_dashboard.png" /></p>
+<p>The clearest panel is <strong>Cost by Cohort</strong>: the pink <code>rt-chaos</code> slice ($0.00115) is over 1.5× the green <code>rt-control</code> slice ($0.00073) for <em>the exact same ten questions</em>. The value tiles count retried calls and wasted tokens straight from the span attributes — no code change, just a query. (They read a little above the clean table further up because the dashboard tallies every request in its window, warm-ups included; the table is the controlled 10-vs-10.)</p>
+<hr />
+<h2 id="closing-the-loop-alert-on-the-tax">Closing the loop: alert on the tax</h2>
+<p>A number on a dashboard nobody looks at is worthless. So I made the retry tax <strong>page me</strong>. SigNoz v0.133 alert rules use the new v5 <code>queries: []</code> array (each query wrapped in a <code>{type, spec}</code> envelope) — worth knowing, because the old <code>builderQueries</code> map returns a flat <em>"alert rule is not valid"</em>. The rule counts dropped attempts over a window:</p>
+<pre><code class="language-json">{
+  &quot;alert&quot;: &quot;Agent Retry Tax: LLM responses being retried&quot;,
+  &quot;alertType&quot;: &quot;TRACES_BASED_ALERT&quot;,
+  &quot;version&quot;: &quot;v5&quot;,
+  &quot;condition&quot;: {
+    &quot;compositeQuery&quot;: {
+      &quot;queries&quot;: [{
+        &quot;type&quot;: &quot;builder_query&quot;,
+        &quot;spec&quot;: {
+          &quot;name&quot;: &quot;A&quot;, &quot;signal&quot;: &quot;traces&quot;,
+          &quot;aggregations&quot;: [{ &quot;expression&quot;: &quot;count()&quot; }],
+          &quot;filter&quot;: { &quot;expression&quot;:
+            &quot;service.name = 'observable-agent' AND name = 'llm.chat' AND retry.reason = 'response_dropped'&quot; }
+        }
+      }],
+      &quot;panelType&quot;: &quot;graph&quot;, &quot;queryType&quot;: &quot;builder&quot;
+    },
+    &quot;op&quot;: &quot;above&quot;, &quot;target&quot;: 0, &quot;matchType&quot;: &quot;at_least_once&quot;
+  }
+}
+</code></pre>
+<p><code>POST /api/v1/rules</code>, and within a minute it was firing on the chaos data:</p>
+<p><img alt="SigNoz Triggered Alerts: 'Agent Retry Tax' firing, severity warning, with the firing-since timestamp" src="shots2/06_triggered_alerts.png" /></p>
+<p>Now the moment my agent starts silently re-inferring — dropped responses, guardrail rejects, 429 back-offs — I find out from an alert instead of from a surprise invoice.</p>
+<hr />
+<h2 id="whats-honest-about-this">What's honest about this</h2>
+<p>I <em>injected</em> the fault, so don't read the exact 57% as a universal constant — your tax depends on your retry policy and how often reality trips it. But the <strong>mechanism</strong> is completely real: an LLM call that completes and then gets discarded costs you full tokens and full latency, and by default that cost is invisible because the agent recovers. Genuine sources of the same tax: JSON that won't parse, tool arguments that fail schema validation, content-filter rejections, timeouts, and rate-limit retries — each re-invokes the model, producing the same duplicated <code>llm.chat</code> span you see here. (This demo wires up the dropped-response path; the others share the identical signature.)</p>
+<p>The takeaway isn't "retries are bad" — retries are how agents stay reliable. It's that <strong>an un-observed retry is a tax you can't see, can't bound, and can't alert on.</strong> Three OpenTelemetry attributes — <code>llm.attempt</code>, <code>retry.reason</code>, and the dropped-attempt's token counts — turn it into a first-class signal you can trace, chart, and page on. In SigNoz, that took one attribute loop and one filter.</p>
+<p>If you can't observe your AI agents, you don't own them — and you definitely don't own their retry bill.</p>
+<p><em>Stack: SigNoz v0.133 (self-hosted via Foundry on WSL2 + Docker Engine), OpenTelemetry Python SDK, Ollama <code>llama3.2:1b</code>. Agent + instrumentation + load driver: ~250 lines of Python. Built for the WeMakeDevs × SigNoz "Agents of SigNoz" hackathon.</em></p>
+</div></body></html>

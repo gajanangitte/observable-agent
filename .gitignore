@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# runtime + secrets (never commit)
+heal_state.json
+.signoz_api_key
+*.log
+state.json
+blog/state.json
+token.txt
+blog/token.txt
+*.token
+devto_articles.json
+.env
+.env.*
