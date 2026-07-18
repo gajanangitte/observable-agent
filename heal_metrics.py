@@ -26,6 +26,18 @@ def init():
     _m["rate"] = meter.create_histogram(
         "heal.retry_rate", unit="1",
         description="Observed retry-tax rate per cohort (0..1), pre vs post heal")
+    _m["policy"] = meter.create_counter(
+        "heal.policy", unit="{decision}",
+        description="Policy-gate decisions on proposed remediations")
+    _m["rollback"] = meter.create_counter(
+        "heal.rollback", unit="{rollback}",
+        description="Remediations rolled back after a failed verify")
+    _m["spend"] = meter.create_histogram(
+        "heal.cost.spend", unit="USD",
+        description="Observed per-request LLM spend per cohort, pre vs post heal")
+    _m["cpr"] = meter.create_histogram(
+        "heal.cost.calls_per_request", unit="1",
+        description="Observed llm.chat calls per request per cohort, pre vs post heal")
 
 
 def breach(slo, cohort):
@@ -46,3 +58,19 @@ def mttr(ms, slo):
 
 def retry_rate(rate, cohort, phase):
     _m["rate"].record(rate, {"cohort": cohort, "phase": phase})
+
+
+def policy(decision, action):
+    _m["policy"].add(1, {"decision": decision, "action": action})
+
+
+def rollback(action):
+    _m["rollback"].add(1, {"action": action})
+
+
+def cost_spend(usd, cohort, phase):
+    _m["spend"].record(usd, {"cohort": cohort, "phase": phase})
+
+
+def calls_per_request(value, cohort, phase):
+    _m["cpr"].record(value, {"cohort": cohort, "phase": phase})

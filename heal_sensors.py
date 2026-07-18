@@ -15,6 +15,8 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 TARGET_SERVICE = "observable-agent"   # the managed workload the healer watches
 RETRY_SLO_MAX_RATE = 0.05             # > 5% dropped-and-retried llm.chat = breach
 LATENCY_SLO_MAX_MS = 60000            # agent.invoke p95 must stay under 60s
+COST_SLO_MAX_CALLS_PER_REQ = 6        # > 6 llm.chat per request = runaway-spend breach
+NOMINAL_CALL_COST_USD = 0.00004       # fallback per-call cost for the spend headline
 
 tracer = trace.get_tracer("self-healer")
 _NS_PER_MS = 1_000_000
@@ -60,6 +62,15 @@ def _count(mcp, filter_expr, time_range="20m"):
     return int(val) if val is not None else 0
 
 
+def _sum(mcp, attr, filter_expr, time_range="20m"):
+    """Best-effort sum of a numeric span attribute (None if not aggregatable)."""
+    parsed = _agg(mcp, {
+        "aggregation": "sum", "aggregateOn": attr,
+        "filter": filter_expr, "timeRange": time_range, "limit": "5",
+    })
+    return _scalar(parsed)
+
+
 def retry_slo(mcp, cohort, time_range="20m"):
     """Retry-tax SLO: fraction of a cohort's llm.chat calls that were dropped
     and retried. This is the healer's primary sensor."""
@@ -76,6 +87,35 @@ def retry_slo(mcp, cohort, time_range="20m"):
         "headline": (f"{dropped}/{total} llm.chat calls were dropped and retried "
                      f"(retry rate {rate:.0%} vs SLO max {RETRY_SLO_MAX_RATE:.0%}) "
                      f"in cohort '{cohort}'."),
+    }
+
+
+def cost_slo(mcp, cohort, time_range="20m"):
+    """Cost/runaway SLO: how many llm.chat calls a cohort burns per request (a
+    stuck agent loops and runs up the bill). The healer's bill-shock sensor.
+
+    Breach is measured on calls-per-request (always available via count); the
+    dollar spend is summed from the per-call cost attribute when SigNoz can
+    aggregate it, else estimated, purely for the headline."""
+    svc = f"service.name = '{TARGET_SERVICE}' AND experiment.id = '{cohort}'"
+    calls = _count(mcp, svc + " AND name = 'llm.chat'", time_range)
+    reqs = _count(mcp, svc + " AND name = 'agent.invoke'", time_range)
+    cpr = (calls / reqs) if reqs else float(calls)
+    spent = _sum(mcp, "gen_ai.usage.cost_usd", svc + " AND name = 'llm.chat'", time_range)
+    if spent is None:
+        spent = calls * NOMINAL_CALL_COST_USD
+    per_req_spend = (spent / reqs) if reqs else spent
+    breached = cpr > COST_SLO_MAX_CALLS_PER_REQ
+    return {
+        "slo": "cost_runaway", "cohort": cohort,
+        "requests": reqs, "llm_calls": calls,
+        "calls_per_request": round(cpr, 2),
+        "spend_usd": round(spent, 6),
+        "spend_per_request_usd": round(per_req_spend, 6),
+        "threshold_calls": COST_SLO_MAX_CALLS_PER_REQ, "breached": breached,
+        "headline": (f"{calls} llm.chat calls across {reqs} request(s) = "
+                     f"{cpr:.1f}/request (~${spent:.6f} spend) vs SLO max "
+                     f"{COST_SLO_MAX_CALLS_PER_REQ}/request in cohort '{cohort}'."),
     }
 
 

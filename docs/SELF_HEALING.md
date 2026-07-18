@@ -3,8 +3,9 @@
 *Track T01 — AI & Agent Observability · Agents of SigNoz (WeMakeDevs × SigNoz)*
 
 **A local AI agent that uses self-hosted SigNoz — through its MCP server — as the
-sensor in a closed control loop: it detects a reliability-SLO breach, diagnoses
-it, remediates it, and verifies the fix. Everything runs on a laptop: SigNoz in
+sensor in a *governed* closed control loop: it detects a reliability-SLO breach,
+diagnoses it, applies a **policy-gated** remediation, verifies the fix, and rolls
+it back if the breach doesn't clear. Everything runs on a laptop: SigNoz in
 WSL2, the model on Ollama. No cloud, no API keys, no bill.**
 
 > Most "AI + observability" demos stop at *observe*. This one closes the loop to
@@ -79,6 +80,90 @@ between the `-pre` and `-post` cohorts, and the `agent.heal` span breakdown:
 
 ---
 
+## A second incident: the bill-shock kill-switch
+
+The retry tax wastes tokens a few at a time. The scarier failure is a **runaway
+agent** — one stuck in a loop, issuing LLM call after LLM call, running up an
+unbounded bill. Same governed loop, a different sensor and a different fix:
+
+```bash
+python self_heal.py --scenario cost
+```
+
+The workload is seeded with a runaway-loop fault (honest chaos, like the
+response-drop) so each request keeps issuing "reflection" `llm.chat` calls that do
+no new work. The cost sensor measures **calls-per-request** from the traces; the
+SLO is a ceiling of 6.
+
+![The bill-shock heal loop as one trace](shots/05_billshock_trace.png)
+
+In the hero run (trace `1016e57b2073b2ebedbb013386060b49`), the local
+`qwen2.5:3b` read the incident via MCP — *"28 `llm.chat` calls across 2 requests =
+14/request, ~$0.0014 spend, vs SLO max 6"* — and chose **`set_cost_budget`** on
+its own. That arms a per-request **cost circuit-breaker**: the next rollout
+structurally **severs** any request that reaches the budget, so a runaway can't
+keep spending.
+
+![read_incident: the cost diagnosis pulled from SigNoz via MCP](shots/07_cost_incident.png)
+
+> `tool.result` came straight from the traces the runaway had just emitted:
+> `llm_calls: 28`, `calls_per_request: 14.0`, `spend_usd: 0.0014`, and a root
+> cause — *"stuck in a loop … it needs a hard per-request spend budget."*
+
+| Metric | Value |
+|---|---|
+| Cost SLO | ≤ 6 `llm.chat` calls per request |
+| Calls/request **before** | **13.5** (breach) |
+| Calls/request **after** | **2.5** (healed) |
+| Spend/request | **$0.000700 → $0.000123** (~82% cut) |
+| Remediation | `set_cost_budget` — **chosen by the model**; arms a $0.0001/request breaker |
+| MTTR | **177s** (breach detected → verified healed) |
+| Trace ID | `1016e57b2073b2ebedbb013386060b49` |
+
+![set_cost_budget: the model-chosen ACT, cleared by the policy gate](shots/06_cost_budget_span.png)
+
+> The span carries the whole decision: `heal.policy.risk = low`,
+> `heal.policy.reversible = true`, `heal.policy.autonomy = auto` →
+> `heal.policy.allow = true` (*"risk 'low' within cap 'low' and reversible"*), and
+> the effect — *"armed a $0.000100 per-request cost circuit-breaker; the next
+> rollout structurally severs any request that reaches it."*
+
+The kill-switch is a real structural cut, not a warning: when cumulative
+per-request cost crosses the budget, the agent stops issuing LLM calls, tags the
+span `agent.request.severed = true` / `cost.circuit_broken = true`, and emits an
+`agent.cost.circuit_break` metric. Verification re-queries SigNoz and sees
+calls-per-request back under the SLO — healed, grounded in telemetry.
+
+---
+
+## Governance: every action passes a policy gate
+
+Letting software *act* on production is only safe if the action is constrained.
+So every actuator mutation routes through a **policy gate** (`heal_policy.py`)
+*before* it can touch the control plane:
+
+- **Autonomy levels** — `observe → suggest → approve → auto`. The gate reads
+  `HEAL_AUTONOMY`; in `auto` it applies changes itself, in `approve` it holds them
+  for a human, in `suggest`/`observe` it only proposes.
+- **Per-action risk + reversibility + blast radius** — every action carries a
+  static policy. In `auto` with `auto_max_risk = low`, low-risk *reversible*
+  actions (`disable_fault_injection`, `enable_mitigation`, `set_cost_budget`)
+  auto-apply; a medium-risk `switch_model` is **held for approval** instead of
+  being forced through.
+- **An audit line per decision** — allowed / held / denied, with the reason,
+  recorded as a `heal.policy` metric and printed — a trail of *what was allowed
+  and why*.
+
+When an action is held, the orchestrator doesn't force it — it **escalates**
+(*"remediation held for human approval"*) and stops. And when an applied action
+*doesn't* clear the breach, the loop **rolls back**: it snapshots the control
+plane before each attempt and, on a failed verify, restores the snapshot (a
+`heal.rollback` span) before trying the next action. The retry hero heals on the
+first attempt, so it never needs the rollback — but the machinery is there, and
+it's what separates "act" from "act *safely*".
+
+---
+
 ## Why this is a good use of SigNoz
 
 SigNoz plays **three roles** in one loop — and because all three read the same telemetry, they share one source of truth:
@@ -139,12 +224,13 @@ rollouts never bleed into each other's SLO math.
 
 | File | Role |
 |---|---|
-| `self_heal.py` | Orchestrator + the `agent.heal` root trace. `detect → decide → act → verify`, MTTR, outcome. |
-| `heal_sensors.py` | The **senses**: retry-tax & latency SLO detectors, each a `signoz_aggregate_traces` call wrapped in an `mcp.*` span. Deterministic. |
-| `heal_actuators.py` | The **hands**: `read_incident` (MCP-backed evidence) + `disable_fault_injection` / `enable_mitigation` (plus a `switch_model` actuator held in reserve), exposed to the model as OpenAI tools. This run advertised only the two retry-tax remediations. |
-| `heal_controls.py` | The **control plane** (`heal_state.json`) shared by healer and canary; `canary_env()` is the seam between them. |
+| `self_heal.py` | Orchestrator + the `agent.heal` root trace. Governed `detect → decide → act → verify → rollback`, MTTR, outcome. `--scenario {retry,cost}`. |
+| `heal_policy.py` | The **governor**: autonomy levels + per-action risk/reversibility/blast-radius; `evaluate()` is the gate every mutation passes before it touches the control plane. |
+| `heal_sensors.py` | The **senses**: retry-tax, latency, and cost (calls-per-request) SLO detectors, each a `signoz_aggregate_traces` call wrapped in an `mcp.*` span. Deterministic. |
+| `heal_actuators.py` | The **hands** (all **policy-gated**): `read_incident` / `read_cost_incident` (MCP-backed evidence) + `disable_fault_injection` / `enable_mitigation` / `set_cost_budget` (and a `switch_model` held for approval), exposed to the model as OpenAI tools. |
+| `heal_controls.py` | The **control plane** (`heal_state.json`) shared by healer and canary; `snapshot()`/`restore()` back the rollback; `canary_env()` is the seam between them. |
 | `heal_canary.py` | The **managed workload rollout** — runs the observable-agent under a cohort tag as a subprocess. |
-| `heal_metrics.py` | Healer instruments: `heal.slo.breach`, `heal.action`, `heal.result`, `heal.mttr`, `heal.retry_rate`. |
+| `heal_metrics.py` | Healer instruments: `heal.slo.breach`, `heal.action`, `heal.result`, `heal.mttr`, `heal.retry_rate`, `heal.policy`, `heal.rollback`, `heal.cost.*`. |
 | `heal_dashboard.py` | Builds the Self-Healing dashboard via the SigNoz v5 dashboards API. |
 
 ---
@@ -173,13 +259,15 @@ Prereqs (see the repo [README](../README.md)): self-hosted SigNoz on
 
 ```bash
 # from the observable-agent/ directory, venv active
-python self_heal.py
+python self_heal.py                    # the retry-tax incident
+python self_heal.py --scenario cost    # the bill-shock kill-switch
 ```
 
 It will: reset the workload to the broken state → roll out the `-pre` canary →
 detect the breach via MCP → have the local model read the incident and pick a
-fix → roll out the `-post` canary → verify via MCP → print the timeline, MTTR,
-and a link to the `agent.heal` trace in SigNoz.
+**policy-gated** fix → roll out the `-post` canary → verify via MCP (rolling back
+if the breach didn't clear) → print the timeline, MTTR, and a link to the
+`agent.heal` trace in SigNoz.
 
 Then rebuild the dashboard any time with:
 
@@ -225,8 +313,13 @@ The brief taken literally — *close the loop from diagnose to act*:
   agent's sensor *and* scoreboard — detection and verification are real
   `signoz_aggregate_traces` queries, so the *healed* verdict is grounded in
   telemetry, not the model's word.
-- **A measurable outcome.** Retry-tax SLO **40% → 0%**, **MTTR 141s**, on a live
-  self-hosted stack, reproducible with one command.
+- **A measurable outcome, twice.** Retry-tax SLO **40% → 0%** (MTTR 141s); and a
+  runaway agent's spend **$0.000700 → $0.000123/request**, calls **13.5 → 2.5**
+  (MTTR 177s) — both on a live self-hosted stack, each reproducible with one command.
+- **It acts *safely*.** Every remediation clears a policy gate (autonomy level +
+  risk + reversibility); risky actions are held for approval, and a fix that
+  fails to verify is rolled back. Action without governance is a liability — this
+  is action *with* it.
 - **Honest about the hard parts.** Small-model tool-calling, the observer effect,
   and keeping the LLM out of the reliability hot path are documented, not hidden.
 

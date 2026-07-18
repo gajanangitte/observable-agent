@@ -90,28 +90,30 @@ the math.
 
 ---
 
-## Competition project — "Self-Healing SRE Sidekick" (Track T01)
+## Competition project — "The self-healing control loop" (Track T01)
 
 **Hook:** Most AI-observability demos stop at *observe*. This one closes the loop
-to *act* — using SigNoz (via MCP) as the sensor, the diagnostic surface, and the
-scoreboard.
+to *act* — safely. Using SigNoz (via MCP) as sensor, diagnostic surface, and
+scoreboard, a local model heals two real incidents through a policy gate.
 
-**Abstract (~60 words):**
-A local agent uses self-hosted SigNoz through its MCP server as a closed control
-loop: `detect → diagnose → act → verify`, all in one `agent.heal` trace. It
-detects a retry-tax SLO breach, the local qwen2.5:3b reads the incident *from
-SigNoz* and picks a fix, an actuator flips the control plane, and a re-query
-verifies the heal. Hero run: retry rate 40% → 0%, MTTR 141s. Detection/verification
-are deterministic MCP queries; the LLM only decides.
+**Abstract (~65 words):**
+A local agent uses self-hosted SigNoz through its MCP server as a *governed*
+closed control loop: `detect → diagnose → act → verify → rollback`, all one
+`agent.heal` trace. Every fix clears a policy gate (autonomy + risk +
+reversibility). It heals a retry-tax breach (40% → 0%, MTTR 141s) and a runaway
+bill-shock loop — arming a cost circuit-breaker that cuts spend/request $0.000700
+→ $0.000123 (MTTR 177s). Detection/verification are deterministic MCP queries;
+the LLM only decides.
 
 **Tags:** `signoz` `mcp` `self-healing` `sre` `ai-agents` `opentelemetry`
 
 **Social Buzz post:**
-> Observability that acts. 🔧
+> Observability that *acts*. 🔧
 >
-> My self-healing SRE agent uses self-hosted @SigNozHQ via MCP as a closed
-> control loop — detect → diagnose → act → verify, all one trace. A local model
-> read the incident FROM SigNoz and fixed it: retry rate 40%→0%, MTTR 141s. 👇
+> My agent uses self-hosted @SigNozHQ via MCP as a governed control loop — detect
+> → diagnose → act → verify → rollback, all one trace. A local model read a
+> runaway-spend incident FROM SigNoz and armed a cost kill-switch: spend/request
+> cut ~82%, every action through a policy gate. 👇
 > https://github.com/gajanangitte/observable-agent
 >
 > #AgentsOfSigNoz @wemakedevs

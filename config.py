@@ -27,6 +27,19 @@ CHAOS_DROP_ONCE = os.getenv("CHAOS_DROP_RESPONSE_ONCE", "0") == "1"
 LLM_MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", "1"))
 RETRY_BACKOFF_MS = int(os.getenv("RETRY_BACKOFF_MS", "250"))
 
+# --- Cost circuit breaker (the "bill-shock" kill-switch) ----------------------
+# A hard per-request spend budget. When > 0 and a single agent.invoke's cumulative
+# LLM cost reaches it, the agent STRUCTURALLY SEVERS further model calls for that
+# request -- a runtime kill-switch -- so a stuck or runaway agent can never run up
+# an unbounded bill. 0 disables the guard (default), so behaviour is unchanged.
+COST_BUDGET_USD = float(os.getenv("COST_BUDGET_USD", "0") or 0)
+# Injected runaway-loop fault (honest chaos, exactly like CHAOS_DROP_RESPONSE_ONCE):
+# when on, a request keeps issuing llm.chat "reflection" calls -- burning tokens
+# with no new work -- up to CHAOS_RUNAWAY_CALLS, simulating a stuck agent. The cost
+# circuit-breaker above is what stops it; without a budget it runs the bill up.
+CHAOS_RUNAWAY = os.getenv("CHAOS_RUNAWAY", "0") == "1"
+CHAOS_RUNAWAY_CALLS = int(os.getenv("CHAOS_RUNAWAY_CALLS", "12"))
+
 # --- SigNoz MCP server (self-observability) -----------------------------------
 # The agent can read its OWN telemetry back out of SigNoz through the official
 # SigNoz MCP server. Point this at the server's streamable-HTTP endpoint.

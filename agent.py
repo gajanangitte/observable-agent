@@ -42,6 +42,7 @@ class Agent:
                  root_span="agent.invoke", temperature=0.1):
         self.client = OpenAI(base_url=config.OLLAMA_BASE_URL, api_key=config.OLLAMA_API_KEY)
         self._chaos = threading.local()
+        self._req = threading.local()   # per-request cost/call accumulator (breaker)
         # Default to the built-in SRE tools; the introspection agent injects its
         # own SigNoz-MCP tool set. Behaviour is byte-identical when unset.
         self._tool_schemas = tool_schemas if tool_schemas is not None else tools.TOOL_SCHEMAS
@@ -109,6 +110,9 @@ class Agent:
                     continue
 
                 cost = telemetry.record_llm(config.MODEL, in_tok, out_tok, latency_ms)
+                # Feed the per-request cost circuit-breaker (see invoke()).
+                self._req.cost = getattr(self._req, "cost", 0.0) + cost
+                self._req.calls = getattr(self._req, "calls", 0) + 1
                 choice = resp.choices[0]
                 span.set_attribute("gen_ai.response.model", resp.model or config.MODEL)
                 span.set_attribute("gen_ai.response.finish_reason", choice.finish_reason or "")
@@ -149,28 +153,77 @@ class Agent:
             log.info("tool.%s args=%s -> %s", name, args, result)
             return result
 
+    def _severed_msg(self):
+        return (f"[severed] Cost circuit-breaker tripped: this request reached its "
+                f"${config.COST_BUDGET_USD:.6f} budget after {getattr(self._req, 'calls', 0)} "
+                f"LLM calls, so further model calls were refused.")
+
+    def _maybe_sever(self, span) -> bool:
+        """Return True if the per-request cost budget has been hit. On the first
+        breach it stamps the span, emits an event + metric, and logs -- this is the
+        structural kill-switch that stops a runaway agent from running up the bill."""
+        budget = config.COST_BUDGET_USD
+        spent = getattr(self._req, "cost", 0.0)
+        if budget <= 0 or spent < budget:
+            return False
+        if not getattr(self._req, "severed", False):
+            self._req.severed = True
+            calls = getattr(self._req, "calls", 0)
+            span.set_attribute("cost.circuit_broken", True)
+            span.set_attribute("cost.budget_usd", round(budget, 6))
+            span.set_attribute("cost.spent_usd", round(spent, 6))
+            span.add_event("cost.circuit_break", {
+                "cost.budget_usd": round(budget, 6),
+                "cost.spent_usd": round(spent, 6),
+                "llm.calls": calls})
+            telemetry.record_cost_break(config.MODEL, spent, budget)
+            log.warning("cost circuit-breaker TRIPPED: $%.6f >= budget $%.6f after %d calls; "
+                        "severing further llm.chat for this request", spent, budget, calls)
+        return True
+
+    def _runaway(self, span, messages):
+        """Injected runaway-loop fault: keep issuing llm.chat calls that do no new
+        work, so a stuck agent's spend climbs -- until the cost breaker severs it."""
+        span.set_attribute("chaos.runaway", True)
+        nudge = messages + [{"role": "user",
+                             "content": "Reflect further on your answer and continue."}]
+        for _ in range(config.CHAOS_RUNAWAY_CALLS):
+            if self._maybe_sever(span):
+                return True
+            self._chat(nudge)   # burns tokens; result intentionally ignored
+        return self._maybe_sever(span)
+
     def invoke(self, question: str) -> str:
         with tracer.start_as_current_span(self._root_span, kind=SpanKind.SERVER) as span:
             span.set_attribute("agent.question", question)
             span.set_attribute("gen_ai.request.model", config.MODEL)
             if config.EXPERIMENT_ID:
                 span.set_attribute("experiment.id", config.EXPERIMENT_ID)
+            if config.COST_BUDGET_USD > 0:
+                span.set_attribute("cost.budget_usd", round(config.COST_BUDGET_USD, 6))
             # Arm the one-shot response-drop for this request (if chaos is on).
             self._chaos.armed = config.CHAOS_DROP_ONCE
+            self._req.cost = 0.0
+            self._req.calls = 0
+            self._req.severed = False
             messages = [
                 {"role": "system", "content": self._system_prompt},
                 {"role": "user", "content": question},
             ]
             tool_calls_made = 0
+            final, status = None, "max_steps"
             try:
                 for step in range(MAX_STEPS):
+                    # Cost kill-switch: sever BEFORE spending more on this request.
+                    if self._maybe_sever(span):
+                        final, status = self._severed_msg(), "severed"
+                        span.set_attribute("agent.steps", step + 1)
+                        break
                     msg = self._chat(messages)
                     if not msg.tool_calls:
                         span.set_attribute("agent.steps", step + 1)
-                        span.set_attribute("agent.tool_calls", tool_calls_made)
-                        telemetry.record_request("ok")
-                        span.set_status(Status(StatusCode.OK))
-                        return msg.content or ""
+                        final, status = msg.content or "", "ok"
+                        break
                     messages.append({
                         "role": "assistant",
                         "content": msg.content or "",
@@ -193,10 +246,21 @@ class Agent:
                             "tool_call_id": tc.id,
                             "content": json.dumps(result),
                         })
+                if status == "max_steps":
+                    final = "Reached the step limit before producing a final answer."
+
+                # Injected runaway-loop fault runs after the normal answer is ready.
+                if config.CHAOS_RUNAWAY and status != "severed" and self._runaway(span, messages):
+                    final, status = self._severed_msg(), "severed"
+
                 span.set_attribute("agent.tool_calls", tool_calls_made)
-                telemetry.record_request("max_steps")
+                span.set_attribute("agent.request.llm_calls", getattr(self._req, "calls", 0))
+                span.set_attribute("agent.request.cost_usd", round(getattr(self._req, "cost", 0.0), 6))
+                if getattr(self._req, "severed", False):
+                    span.set_attribute("agent.request.severed", True)
+                telemetry.record_request(status)
                 span.set_status(Status(StatusCode.OK))
-                return "Reached the step limit before producing a final answer."
+                return final
             except Exception as e:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 span.record_exception(e)

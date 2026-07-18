@@ -24,6 +24,7 @@ import config
 
 _providers = {}
 _tokens = _cost = _llm_latency = _tool_latency = _requests = _retries = None
+_cost_break = None
 
 
 def _tag(attrs):
@@ -80,7 +81,7 @@ def setup_telemetry():
     otel_log.propagate = False
 
     # ---- Metric instruments ----
-    global _tokens, _cost, _llm_latency, _tool_latency, _requests, _retries
+    global _tokens, _cost, _llm_latency, _tool_latency, _requests, _retries, _cost_break
     meter = metrics.get_meter("observable-agent")
     _tokens = meter.create_counter(
         "gen_ai.client.token.usage", unit="{token}",
@@ -100,6 +101,9 @@ def setup_telemetry():
     _retries = meter.create_counter(
         "agent.retry.count", unit="{retry}",
         description="LLM retries triggered (e.g. after a dropped response)")
+    _cost_break = meter.create_counter(
+        "agent.cost.circuit_break", unit="{event}",
+        description="Times the per-request cost budget severed further LLM calls")
 
     _providers.update(trace=tp, metrics=mp, logs=lp)
     return tp, mp, lp
@@ -132,6 +136,12 @@ def record_request(status="ok"):
 def record_retry(model, reason):
     """Count one retry (e.g. a dropped response forced the agent to re-infer)."""
     _retries.add(1, _tag({"gen_ai.request.model": model, "retry.reason": reason}))
+
+
+def record_cost_break(model, spent_usd, budget_usd):
+    """Count one cost circuit-break: the per-request budget severed further calls."""
+    _cost_break.add(1, _tag({"gen_ai.request.model": model,
+                             "cost.budget_usd": round(budget_usd, 6)}))
 
 
 def shutdown():

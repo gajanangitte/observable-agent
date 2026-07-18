@@ -9,6 +9,9 @@ Hero trace (service = self-healer):
   02_act_span.png      - tool.disable_fault_injection drawer: the model-chosen ACT
   03_read_incident.png - tool.read_incident drawer: diagnose via the SigNoz MCP server
   04_dashboard.png     - the Self-Healing dashboard (before/after + heal activity)
+  05_billshock_trace.png - the bill-shock / runaway-spend agent.heal loop
+  06_cost_budget_span.png - tool.set_cost_budget drawer: the model arming the cost kill-switch (policy-gated)
+  07_cost_incident.png - tool.read_incident drawer: the cost diagnosis via the SigNoz MCP server
 """
 import time
 from pathlib import Path
@@ -19,6 +22,7 @@ BASE = "http://localhost:8080"
 SHOTS = Path("docs/shots")
 SHOTS.mkdir(parents=True, exist_ok=True)
 TRACE = "31514172b44f0f64548eec5c897eb35b"
+COST_TRACE = "1016e57b2073b2ebedbb013386060b49"
 DASH = "019f7410-7d88-7b73-bc25-8be374efeb11"
 
 
@@ -70,6 +74,18 @@ def main():
         time.sleep(9)
         page.screenshot(path=str(SHOTS / "04_dashboard.png"), full_page=True)
         print("saved 04_dashboard.png; url:", page.url)
+
+        # 5) Bill-shock: the cost / runaway-spend closed loop.
+        page.goto(f"{BASE}/trace/{COST_TRACE}", wait_until="networkidle")
+        time.sleep(9)
+        page.screenshot(path=str(SHOTS / "05_billshock_trace.png"), full_page=True)
+        print("saved 05_billshock_trace.png; url:", page.url)
+        # 6) The ACT: the model arming the per-request cost kill-switch (policy-gated).
+        open_span(page, "tool.set_cost_budget", "06_cost_budget_span.png", xy=(268, 893))
+        # 7) The DIAGNOSE: reading the cost incident through the MCP server.
+        page.goto(f"{BASE}/trace/{COST_TRACE}", wait_until="networkidle")
+        time.sleep(9)
+        open_span(page, "tool.read_incident", "07_cost_incident.png", xy=(260, 753))
 
         ctx.close()
         b.close()

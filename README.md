@@ -1,30 +1,50 @@
 # observable-agent
 
-A tiny **SRE sidekick** AI agent, fully instrumented with **OpenTelemetry** and observed in **self-hosted SigNoz** — traces, tokens, cost, and latency for every LLM call and tool execution.
+**Observability that acts.** A local AI agent that doesn't just *watch* itself in
+**self-hosted SigNoz** — it **heals** itself: it detects a reliability-SLO breach,
+diagnoses it by reading its own telemetry, applies a **policy-gated** fix, verifies
+it, and rolls back if the fix doesn't hold. Fully **OpenTelemetry**-native, runs
+entirely on **Ollama** — no API keys, no cloud, no bill.
 
-Built for the *Agents of SigNoz* hackathon (WeMakeDevs × SigNoz). Runs entirely locally on **Ollama** — no API keys, no bill.
+Built for the *Agents of SigNoz* hackathon (WeMakeDevs × SigNoz). It began as an
+instrumented SRE sidekick — traces, tokens, cost, and latency for every LLM call
+and tool — and grew into a closed control loop that turns observability into action.
 
-> Read the write-up: [`blog/blog.md`](blog/blog.md) — *"I gave a local Llama agent OpenTelemetry eyes."*
+> The vision — an open, OTel-native control plane that heals AI agents: [`docs/PITCH.md`](docs/PITCH.md).
 
 ---
 
-## 🏆 Competition project: Self-Healing SRE Sidekick
+## 🏆 Competition project: the self-healing control loop
 
 The flagship for **Track T01**. The agent uses SigNoz — through its **MCP
-server** — as the sensor in a **closed control loop**: it detects a reliability-SLO
-breach, diagnoses it, remediates it, and verifies the fix. The whole cycle
-(`detect → diagnose → act → verify`) is one `agent.heal` trace.
+server** — as the sensor in a **governed** closed control loop:
+`detect → diagnose → act → verify → rollback`. Every action passes a **policy
+gate** first (autonomy levels `observe → suggest → approve → auto`, an action
+allow-list, and per-action blast-radius limits), and the whole cycle is one
+`agent.heal` trace.
 
-In the hero run, a local `qwen2.5:3b` read the incident *from SigNoz*, chose
-`disable_fault_injection` itself, and drove the retry-tax SLO from **40% → 0%**
-with an **MTTR of 141s** — trace `31514172b44f0f64548eec5c897eb35b`.
+Two incidents, two hero runs — both healed by a local model, both grounded in
+telemetry rather than the model's word:
+
+**Retry tax** — a dropped-and-retried LLM response wastes tokens. The model read
+the incident *from SigNoz*, chose `disable_fault_injection`, and drove the SLO
+from **40% → 0%**, **MTTR 141s** — trace `31514172b44f0f64548eec5c897eb35b`.
+
+**Bill-shock kill-switch** — a runaway agent loops and burns tokens. The model
+read the incident and armed a per-request **cost circuit-breaker** that
+structurally severs the runaway. Spend/request **$0.000700 → $0.000123**, calls
+**13.5 → 2.5** per request (SLO ≤ 6), **MTTR 177s** — trace
+`1016e57b2073b2ebedbb013386060b49`. The fix is low-risk + reversible, so in `auto`
+mode the policy gate applies it automatically; a medium-risk `switch_model` would
+be **held for human approval** instead.
 
 ```bash
-python self_heal.py     # break it → detect via MCP → decide → act → verify via MCP
+python self_heal.py                    # heal the retry-tax incident
+python self_heal.py --scenario cost    # heal the bill-shock / runaway-spend incident
 ```
 
 **➡️ Full writeup: [`docs/SELF_HEALING.md`](docs/SELF_HEALING.md)** (architecture,
-the hero trace, screenshots, and the honest engineering lessons).
+both hero traces, the governance model, screenshots, and the honest lessons).
 
 The write-ups this repo was built on:
 - [`blog/blog.md`](blog/blog.md) — *"I gave a local Llama agent OpenTelemetry eyes."*
@@ -111,8 +131,9 @@ python blog/make_dashboard.py    # creates the dashboard, prints its UUID
 | `tools.py` | Four mock SRE tools + OpenAI tool schemas |
 | `config.py` | Env-overridable config + illustrative per-model cost table |
 | `run_load.py` | Traffic generator (varied SRE questions, incl. an error path) |
-| `self_heal.py` | **Competition project** — closed-loop orchestrator (`agent.heal` trace) |
-| `heal_*.py` | Self-healing modules: sensors (MCP SLO detectors), actuators, control plane, canary rollout, metrics, dashboard |
+| `self_heal.py` | **Competition project** — governed closed-loop orchestrator (`agent.heal` trace); `--scenario {retry,cost}` |
+| `heal_policy.py` | **Governance gate** — autonomy levels + per-action risk/reversibility/blast-radius; the allow-list every mutation passes through |
+| `heal_*.py` | Self-healing modules: sensors (MCP SLO detectors: retry tax + cost), actuators (policy-gated, incl. the cost kill-switch), control plane (+ snapshot/rollback), canary rollout, metrics, dashboard |
 | `mcp_client.py` | Streamable-HTTP bridge to the SigNoz MCP server |
 | `docs/SELF_HEALING.md` | Competition project writeup + hero-run screenshots |
 | `blog/` | Blog posts, screenshots, and the SigNoz login/dashboard/capture scripts |

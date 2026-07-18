@@ -1,17 +1,25 @@
-"""Self-Healing SRE Sidekick -- the closed loop, with SigNoz as the sensor.
+"""Self-Healing SRE Sidekick -- the governed closed loop, SigNoz as the sensor.
 
-SigNoz is both the loop's SENSOR and its SCOREBOARD:
+SigNoz is both the loop's SENSOR and its SCOREBOARD; every remediation passes a
+policy gate before it can act, and a fix that fails to verify is rolled back:
 
   agent.heal (SERVER, service=self-healer)
     |-- heal.canary.pre     break it: roll out the workload under the injected fault
-    |-- heal.detect         MCP: is the retry-tax SLO breached for the pre cohort?
+    |-- heal.detect         MCP: is the SLO breached for the pre cohort?
     |-- heal.decide         local qwen2.5 reads the incident via MCP, picks a fix
     |     |-- llm.chat
     |     |-- tool.read_incident --> mcp.signoz_aggregate_traces
     |     |-- llm.chat
-    |     |-- tool.disable_fault_injection   (the ACT: a control-plane change)
+    |     |-- tool.<remediation>   (the ACT: policy-gated control-plane change)
     |-- heal.canary.post    verify: roll out again under the fixed config
-    |-- heal.verify         MCP: is the retry rate back to zero? -> healed; record MTTR
+    |-- heal.verify         MCP: is the SLO back in bounds? -> healed; record MTTR
+    |-- heal.rollback       (only if verify still breached: revert the change)
+
+Two incidents ship here (``--scenario``): ``retry`` heals the retry-tax (a
+dropped-and-retried response) with ``disable_fault_injection``; ``cost`` heals a
+runaway-spend / bill-shock loop by arming a per-request cost circuit-breaker
+(``set_cost_budget``). Every action clears ``heal_policy`` first -- low-risk
+reversible fixes auto-apply, riskier ones are held for human approval.
 
 The managed workload (observable-agent) runs as canary SUBPROCESSES so each
 rollout picks up the new config fresh -- a real rollout, not an in-process
@@ -27,6 +35,7 @@ os.environ.setdefault("AGENT_MODEL", "qwen2.5:3b")
 os.environ.setdefault("AGENT_MAX_OUTPUT_TOKENS", "300")   # room for decision + tool call
 os.environ.setdefault("CANARY_QUESTIONS", "2")            # 2 rollout requests / cohort
 
+import argparse
 import subprocess
 import sys
 import time
@@ -39,7 +48,8 @@ import telemetry
 import heal_metrics
 import heal_sensors
 import heal_actuators
-from heal_controls import Controls
+import heal_policy
+from heal_controls import Controls, BROKEN, BROKEN_COST
 from mcp_client import SigNozMCP
 from agent import Agent
 
@@ -62,8 +72,65 @@ HEAL_TASK = (
     "remove the fault at its source (or enable_mitigation to compensate for it). "
     "Remediate now."
 )
+HEAL_TASK_COST = (
+    "A cost/runaway-spend SLO was breached in rollout cohort '{cohort}': the agent "
+    "is stuck in a loop, issuing far too many LLM calls per request and running up "
+    "the bill. First call read_incident to confirm the evidence, then call "
+    "set_cost_budget to arm a hard per-request spend cap that a circuit-breaker "
+    "enforces. Remediate now."
+)
 
 MAX_HEAL_ATTEMPTS = 2
+
+
+class Scenario:
+    """One incident the healer can chase: how to break it, sense it, and fix it."""
+
+    def __init__(self, name, title, seed, sensor, actions, task, fallback,
+                 value_of, record, system=HEAL_SYSTEM, min_calls=2):
+        self.name, self.title, self.seed = name, title, seed
+        self.sensor, self.actions, self.task = sensor, actions, task
+        self.fallback, self.value_of, self.record = fallback, value_of, record
+        self.system, self.min_calls = system, min_calls
+
+
+def _retry_value(slo):
+    return ("retry rate", f"{slo['retry_rate']:.0%}", slo["retry_rate"])
+
+
+def _cost_value(slo):
+    return ("spend/request",
+            f"${slo['spend_per_request_usd']:.6f} ({slo['calls_per_request']:.1f} calls/req)",
+            slo["calls_per_request"])
+
+
+def _retry_record(slo, cohort, phase):
+    heal_metrics.retry_rate(slo["retry_rate"], cohort, phase)
+
+
+def _cost_record(slo, cohort, phase):
+    heal_metrics.cost_spend(slo["spend_per_request_usd"], cohort, phase)
+    heal_metrics.calls_per_request(slo["calls_per_request"], cohort, phase)
+
+
+SCENARIOS = {
+    "retry": Scenario(
+        name="retry_tax",
+        title="SELF-HEALING SRE SIDEKICK   (retry-tax incident)",
+        seed=lambda c: c.reset(state=BROKEN),
+        sensor=heal_sensors.retry_slo,
+        actions=("disable_fault_injection", "enable_mitigation"),
+        task=HEAL_TASK, fallback="disable_fault_injection",
+        value_of=_retry_value, record=_retry_record),
+    "cost": Scenario(
+        name="cost_runaway",
+        title="SELF-HEALING SRE SIDEKICK   (bill-shock / runaway-spend incident)",
+        seed=lambda c: c.reset(state=BROKEN_COST),
+        sensor=heal_sensors.cost_slo,
+        actions=("set_cost_budget", "switch_model"),
+        task=HEAL_TASK_COST, fallback="set_cost_budget",
+        value_of=_cost_value, record=_cost_record),
+}
 
 
 def _banner(txt):
@@ -90,35 +157,46 @@ def _run_canary(controls, cohort, span_name):
 
 
 def main():
+    ap = argparse.ArgumentParser(description="Self-healing SRE sidekick (SigNoz control loop)")
+    ap.add_argument("--scenario", default=os.getenv("HEAL_SCENARIO", "retry"),
+                    choices=sorted(SCENARIOS),
+                    help="incident to heal: 'retry' (retry tax) or 'cost' (bill-shock)")
+    args = ap.parse_args()
+    scenario = SCENARIOS[args.scenario]
+
     telemetry.setup_telemetry()
     heal_metrics.init()
     mcp = SigNozMCP(config.MCP_URL)
     controls = Controls()
-    controls.reset(broken=True)   # start sick: response-drop fault injected
+    scenario.seed(controls)       # start sick, in this incident's broken state
+    policy = heal_policy.Policy()  # the governance gate every action passes through
 
     cycle = time.strftime("%H%M%S")
     pre = f"heal-{cycle}-pre"
-    _banner("SELF-HEALING SRE SIDEKICK   (SigNoz = sensor + scoreboard)")
+    _banner(scenario.title + "   (SigNoz = sensor + scoreboard)")
+    print(f"  policy: {policy.summary()}")
 
     after = None
     chosen = None
+    escalated = None
+    label = None
     with tracer.start_as_current_span("agent.heal", kind=SpanKind.SERVER) as root:
         trace_id_hex = format(root.get_span_context().trace_id, "032x")
         root.set_attribute("heal.cycle", cycle)
+        root.set_attribute("heal.scenario", scenario.name)
+        root.set_attribute("heal.policy.autonomy", policy.autonomy)
         root.set_attribute("service.managed", heal_sensors.TARGET_SERVICE)
 
-        # ---- BREAK IT: a rollout under the injected fault ------------------
-        print("\n[SETUP]  managed workload is sick: response-drop fault is injected.")
+        # ---- BREAK IT: a rollout under the injected fault -----------------
+        print(f"\n[SETUP]  managed workload is sick: {scenario.name} incident seeded.")
         _run_canary(controls, pre, "heal.canary.pre")
 
         # ---- DETECT -------------------------------------------------------
         print("\n[DETECT] asking SigNoz (via MCP) whether the rollout breached its SLO...")
         with tracer.start_as_current_span("heal.detect", kind=SpanKind.INTERNAL) as ds:
-            heal_sensors.wait_for_cohort(mcp, pre, min_calls=2)
-            slo = heal_sensors.retry_slo(mcp, pre)
+            heal_sensors.wait_for_cohort(mcp, pre, min_calls=scenario.min_calls)
+            slo = scenario.sensor(mcp, pre)
             ds.set_attribute("slo.name", slo["slo"])
-            ds.set_attribute("slo.retry_rate", slo["retry_rate"])
-            ds.set_attribute("slo.dropped", slo["dropped"])
             ds.set_attribute("slo.breached", slo["breached"])
             print("  " + slo["headline"])
         if not slo["breached"]:
@@ -127,43 +205,65 @@ def main():
             telemetry.shutdown()
             return
         heal_metrics.breach(slo["slo"], pre)
-        heal_metrics.retry_rate(slo["retry_rate"], pre, "pre")
-        root.set_attribute("heal.breach.retry_rate", slo["retry_rate"])
+        scenario.record(slo, pre, "pre")
+        label, pre_str, _ = scenario.value_of(slo)
+        root.set_attribute("heal.breach", pre_str)
         t_breach = time.time()
 
         healed = False
         attempt = 0
-        actions_left = ["disable_fault_injection", "enable_mitigation"]
+        actions_left = list(scenario.actions)
         while not healed and attempt < MAX_HEAL_ATTEMPTS and actions_left:
             attempt += 1
+            snap = controls.snapshot()   # the point this action can be rolled back to
 
-            # ---- DIAGNOSE + DECIDE (the agentic step, via MCP) ------------
+            # ---- DIAGNOSE + DECIDE (the agentic step, via MCP) -----------
             print(f"\n[DIAGNOSE] attempt {attempt}: local {config.MODEL} reads the incident "
                   f"via MCP and decides on a fix...")
-            decisions = []
+            decisions, gate_log = [], []
             schemas, registry = heal_actuators.build(
-                mcp, controls, pre, decisions, actions=tuple(actions_left))
+                mcp, controls, pre, decisions, actions=tuple(actions_left),
+                policy=policy, gate_log=gate_log)
             healer = Agent(tool_schemas=schemas, registry=registry,
-                           system_prompt=HEAL_SYSTEM, root_span="heal.decide",
+                           system_prompt=scenario.system, root_span="heal.decide",
                            temperature=0.0)
             try:
-                healer.invoke(HEAL_TASK.format(cohort=pre))
+                healer.invoke(scenario.task.format(cohort=pre))
             except Exception as e:  # noqa: BLE001
                 print("  decide step raised:", e)
+
+            for d in gate_log:
+                heal_metrics.policy("allowed" if d.allow else
+                                    ("held" if d.requires_approval else "denied"), d.action)
+
             chosen = next((d for d in decisions if d != "read_incident"), None)
             if not chosen:
+                held = [d for d in gate_log if not d.allow and d.requires_approval]
+                if held:
+                    escalated = "awaiting_approval"
+                    root.set_attribute("heal.escalated", escalated)
+                    print(f"  [POLICY] remediation held for human approval "
+                          f"({held[-1].action}: {held[-1].reason}); escalating.")
+                    break
                 # Safety net: the model read the incident but didn't act. Apply the
-                # root-cause fix ourselves, still under a span so the trace records it.
-                chosen = "disable_fault_injection"
+                # scenario's default fix ourselves -- still through the policy gate.
+                chosen = scenario.fallback
                 with tracer.start_as_current_span(f"tool.{chosen}", kind=SpanKind.INTERNAL) as fs:
                     fs.set_attribute("tool.name", chosen)
                     fs.set_attribute("heal.fallback", True)
-                    registry[chosen]()
+                    res = registry[chosen]()
+                if not res.get("applied"):
+                    escalated = "awaiting_approval"
+                    root.set_attribute("heal.escalated", escalated)
+                    print(f"  [POLICY] default remediation {chosen} not applied "
+                          f"({res.get('policy')}); escalating.")
+                    break
                 print("  (model did not act; applied safe default remediation)")
             print(f"[ACT]     remediation applied: {chosen}")
             heal_metrics.action(chosen)
             root.set_attribute(f"heal.action.{attempt}", chosen)
-            actions_left = [a for a in actions_left if a != chosen]
+            actions_left = [a for a in actions_left
+                            if a != chosen and not chosen.startswith(a)]
 
             # ---- VERIFY: a rollout under the fixed config ----------------
             post = f"heal-{cycle}-post{attempt}"
@@ -171,13 +271,23 @@ def main():
                   f"re-checking SigNoz...")
             _run_canary(controls, post, "heal.canary.post")
             with tracer.start_as_current_span("heal.verify", kind=SpanKind.INTERNAL) as vs:
-                heal_sensors.wait_for_cohort(mcp, post, min_calls=2)
-                after = heal_sensors.retry_slo(mcp, post)
-                vs.set_attribute("slo.retry_rate", after["retry_rate"])
+                heal_sensors.wait_for_cohort(mcp, post, min_calls=scenario.min_calls)
+                after = scenario.sensor(mcp, post)
                 vs.set_attribute("slo.breached", after["breached"])
                 print("  " + after["headline"])
             healed = not after["breached"]
-            heal_metrics.retry_rate(after["retry_rate"], post, "post")
+            scenario.record(after, post, "post")
+
+            if not healed:
+                # ---- ROLLBACK: the action didn't clear the breach -> revert it.
+                with tracer.start_as_current_span("heal.rollback", kind=SpanKind.INTERNAL) as rs:
+                    rs.set_attribute("heal.rolled_back_action", chosen)
+                    rs.set_attribute("heal.attempt", attempt)
+                    controls.restore(snap)
+                    print(f"  [ROLLBACK] '{chosen}' did not clear the breach; reverted the "
+                          f"control-plane change to its pre-action snapshot.")
+                heal_metrics.rollback(chosen)
+                root.set_attribute(f"heal.rollback.{attempt}", chosen)
 
         # ---- OUTCOME ------------------------------------------------------
         mttr_ms = (time.time() - t_breach) * 1000
@@ -187,11 +297,16 @@ def main():
         root.set_attribute("heal.mttr_ms", round(mttr_ms))
         root.set_status(Status(StatusCode.OK))
 
-        _banner("HEALED" if healed else "NOT HEALED -- escalate")
-        print(f"  retry rate:  {slo['retry_rate']:.0%}  ->  "
-              f"{after['retry_rate']:.0%}")
-        print(f"  remediation: {chosen}")
-        print(f"  MTTR:        {mttr_ms / 1000:.0f}s   (breach detected -> verified healed)")
+        if escalated:
+            _banner("NOT HEALED -- ESCALATED FOR HUMAN APPROVAL")
+        else:
+            _banner("HEALED" if healed else "NOT HEALED -- escalate")
+        pre_str = scenario.value_of(slo)[1]
+        post_str = scenario.value_of(after)[1] if after is not None else "(no remediation applied)"
+        print(f"  {label}:  {pre_str}  ->  {post_str}")
+        print(f"  remediation: {chosen if chosen else '(none -- held for approval)'}")
+        print(f"  policy:      {policy.summary()}")
+        print(f"  MTTR:        {mttr_ms / 1000:.0f}s   (breach detected -> verified)")
         print(f"  trace:       agent.heal   {trace_id_hex}")
         print(f"  view:        {SIGNOZ_UI}/trace/{trace_id_hex}")
 
