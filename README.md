@@ -53,6 +53,44 @@ The write-ups this repo was built on:
 
 ---
 
+## ▶️ Reproduce it (judges start here)
+
+Everything runs locally — self-hosted SigNoz + a local model. No cloud, no API keys, no bill.
+
+**1. Install SigNoz + its MCP server with Foundry.** This repo ships the exact
+[`casting.yaml`](casting.yaml) + [`casting.yaml.lock`](casting.yaml.lock) so you can reproduce the deployment:
+```bash
+curl -fsSL https://signoz.io/foundry.sh | bash
+foundryctl cast -f casting.yaml     # SigNoz UI :8080 · OTLP :4318 · MCP :8000/mcp
+```
+On Windows, run this inside **WSL 2 with Docker Engine** (not Docker Desktop — ClickHouse Keeper crash-loops under its VM layer).
+
+**2. Start a local model** with [Ollama](https://ollama.com):
+```bash
+ollama pull qwen2.5:3b              # reliable OpenAI-format tool-calling on Ollama
+```
+
+**3. Install the agent:**
+```bash
+python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env                             # defaults assume localhost
+```
+
+**4. See it *observe*** — emit a trace, then open SigNoz → **Traces**:
+```bash
+python agent.py "Is the checkout service healthy?"
+```
+
+**5. See it *heal*** — the flagship, one command per incident:
+```bash
+python self_heal.py                    # retry-tax incident:  retry rate 40% → 0%
+python self_heal.py --scenario cost    # bill-shock incident: arms a cost kill-switch
+```
+Each run prints the timeline, MTTR, and a link to the `agent.heal` trace in SigNoz. Full walkthrough with screenshots: [`docs/SELF_HEALING.md`](docs/SELF_HEALING.md).
+
+---
+
 ## What it does
 
 The agent answers on-call questions (*"Inventory feels slow — pull its health, recent deploys, and the right runbook."*) using a classic tool-calling loop over four mock SRE tools: `get_service_health`, `list_recent_deploys`, `calculate_error_budget`, `search_runbook`.
