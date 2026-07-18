@@ -19,4 +19,7 @@ devto_articles.json
 # session automation scripts + form screenshots (contain personal identifiers; not deliverables)
 blog/devto_*.py
 blog/form_probe_url.py
+blog/reg_submit*.py
+blog/x_*.py
 blog/shots_form/
+blog/shots_x/
