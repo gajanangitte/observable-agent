@@ -24,3 +24,4 @@ blog/reg_submit*.py
 blog/x_*.py
 blog/shots_form/
 blog/shots_x/
+_demo_build/
