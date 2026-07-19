@@ -64,7 +64,8 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
             "fault_signature": "retry.reason=response_dropped",
             "summary": slo["headline"],
             "root_cause": ("An injected fault drops a COMPLETED llm response, forcing a "
-                           "re-inference that spends the tokens twice -- the 'retry tax'."),
+                           "re-inference that spends the tokens twice; that duplicate "
+                           "work is the retry tax."),
         }
 
     def read_cost_incident(**_):
@@ -77,9 +78,9 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
             "spend_usd": slo["spend_usd"],
             "fault_signature": "runaway llm.chat loop (calls_per_request high)",
             "summary": slo["headline"],
-            "root_cause": ("The agent is stuck in a loop, issuing llm.chat calls that do no "
-                           "new work and running up the bill. It needs a hard per-request "
-                           "spend budget so a runtime circuit-breaker severs the runaway."),
+            "root_cause": ("Each request issues many llm.chat calls that repeat without "
+                           "making new progress; the per-request spend scales directly "
+                           "with that call count, so the bill grows with the loop."),
         }
 
     def disable_fault_injection(**_):
@@ -158,8 +159,10 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
             "type": "function",
             "function": {
                 "name": "disable_fault_injection",
-                "description": ("Remediate by removing the injected response-drop fault at its "
-                                "source, so future rollouts stop retrying. Takes no arguments."),
+                "description": ("Remove the injected response-drop fault at its source so future "
+                                "rollouts stop retrying. This eliminates the root cause, but is "
+                                "only possible when you control the fault's source. Takes no "
+                                "arguments."),
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -167,9 +170,10 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
             "type": "function",
             "function": {
                 "name": "enable_mitigation",
-                "description": ("Remediate by enabling an idempotency guard that recovers a "
-                                "completed response instead of re-inferring it, neutralising the "
-                                "retry tax. Takes no arguments."),
+                "description": ("Enable an idempotency guard that recovers a completed response "
+                                "instead of re-inferring it, neutralising the retry tax. This is "
+                                "a compensating control: it stops the waste without removing the "
+                                "underlying fault. Takes no arguments."),
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -177,9 +181,10 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
             "type": "function",
             "function": {
                 "name": "set_cost_budget",
-                "description": ("Remediate a runaway-spend incident by arming a hard per-request "
-                                "cost budget; a runtime circuit-breaker then severs any request "
-                                "that reaches it, capping the bill. Takes no arguments."),
+                "description": ("Arm a hard per-request cost budget; a runtime circuit-breaker "
+                                "then severs any request whose spend reaches it, structurally "
+                                "stopping a runaway loop and capping the bill. A legitimately "
+                                "expensive request would also be cut. Takes no arguments."),
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -187,7 +192,9 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
             "type": "function",
             "function": {
                 "name": "switch_model",
-                "description": "Route the workload to a faster/cheaper model to cut latency.",
+                "description": ("Route the workload to a cheaper or faster model. This lowers "
+                                "the cost and latency of EACH call but does not change how MANY "
+                                "calls a request makes, so it does not stop a runaway loop."),
                 "parameters": {
                     "type": "object",
                     "properties": {"to": {"type": "string", "description": "e.g. llama3.2:1b"}},

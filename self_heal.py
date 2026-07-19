@@ -58,26 +58,25 @@ SIGNOZ_UI = os.getenv("SIGNOZ_UI", "http://localhost:8080")
 tracer = trace.get_tracer("self-healer")
 
 HEAL_SYSTEM = (
-    "You are a self-healing SRE agent that works in two steps. "
-    "STEP 1: call read_incident to fetch the breach evidence from SigNoz. "
-    "STEP 2: based on that evidence, call exactly ONE remediation tool to fix the "
-    "root cause, then stop. read_incident only READS data -- it does not fix "
-    "anything -- so you MUST follow it with a remediation tool call. Do not write "
-    "a prose answer until a remediation tool has been called. Never invent numbers."
+    "You are a self-healing SRE agent. You work in two steps. "
+    "STEP 1: call read_incident to pull the breach evidence from SigNoz. "
+    "STEP 2: weigh the remediation tools available to you and call EXACTLY ONE "
+    "whose effect the evidence shows will clear the breach, then stop. "
+    "read_incident only READS data, it does not fix anything, so you MUST follow "
+    "it with exactly one remediation tool call. Do not write a prose answer until "
+    "a remediation tool has been called. Base your choice only on the evidence and "
+    "each tool's stated trade-offs; never invent numbers."
 )
 HEAL_TASK = (
-    "A retry-tax reliability SLO was breached in rollout cohort '{cohort}': LLM "
-    "responses are being dropped and retried, wasting tokens. First call "
-    "read_incident to confirm the evidence, then call disable_fault_injection to "
-    "remove the fault at its source (or enable_mitigation to compensate for it). "
-    "Remediate now."
+    "A reliability SLO was breached in rollout cohort '{cohort}'. Investigate the "
+    "incident with read_incident, then apply the single remediation best supported "
+    "by that evidence to bring the breached metric back within its SLO. Remediate now."
 )
 HEAL_TASK_COST = (
-    "A cost/runaway-spend SLO was breached in rollout cohort '{cohort}': the agent "
-    "is stuck in a loop, issuing far too many LLM calls per request and running up "
-    "the bill. First call read_incident to confirm the evidence, then call "
-    "set_cost_budget to arm a hard per-request spend cap that a circuit-breaker "
-    "enforces. Remediate now."
+    "A cost SLO was breached in rollout cohort '{cohort}': spend per request is over "
+    "budget. Investigate the incident with read_incident, then apply the single "
+    "remediation best supported by that evidence to bring spend back within the SLO. "
+    "Remediate now."
 )
 
 MAX_HEAL_ATTEMPTS = 2
