@@ -66,10 +66,11 @@ trace:
 > about **two and a half minutes**. Then SigNoz moves the alert back to **Resolved**:
 > the monitoring system closed the loop."
 
-**On screen:** the SigNoz Alerts view going Firing → Resolved, and the `agent.heal`
-trace rooted at `heal.trigger` (reference trace `076158eaca24f824a2fb943fd978ca7a`;
-`docs/shots/01_heal_trace.png` shows the heal waterfall). Click the `read_incident`
-span to show the evidence pulled from SigNoz, and the actuator span.
+**On screen:** the SigNoz Alerts view going Firing → Resolved, and the trace rooted
+at `heal.trigger` (reference `076158eaca24f824a2fb943fd978ca7a`;
+`docs/shots/08_alert_trigger_trace.png` is that exact waterfall). Click the
+`read_incident` span to show the evidence pulled from SigNoz, and the
+`enable_mitigation` actuator span.
 
 ### 2:00 to 2:40 · Incident #2: the bill shock kill switch (the money shot)
 Run it:

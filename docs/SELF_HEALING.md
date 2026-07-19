@@ -174,6 +174,8 @@ heal.trigger                     ← SigNoz alert fires (heal_bridge.py)
    └─ heal.verify                → retry rate 0, healed
 ```
 
+![The SigNoz alert (heal.trigger) and the whole heal as one distributed trace](shots/08_alert_trigger_trace.png)
+
 You can open the alert in SigNoz and walk straight down into the heal it caused.
 That is what makes SigNoz more than a dashboard here: its alerting is the
 **trigger** and its query surface is the **verdict**. The monitoring system opens
