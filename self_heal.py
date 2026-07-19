@@ -42,6 +42,7 @@ import time
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 import config
 import telemetry
@@ -160,6 +161,15 @@ def main():
     ap.add_argument("--scenario", default=os.getenv("HEAL_SCENARIO", "retry"),
                     choices=sorted(SCENARIOS),
                     help="incident to heal: 'retry' (retry tax) or 'cost' (bill-shock)")
+    ap.add_argument("--break-only", action="store_true",
+                    help="seed the fault and emit one breaching rollout for SigNoz to "
+                         "alert on, then exit (no heal). Arms the alert-triggered demo.")
+    ap.add_argument("--no-seed", action="store_true",
+                    help="heal the current (already-sick) control-plane state without "
+                         "re-seeding the fault, e.g. when a SigNoz alert triggered this run.")
+    ap.add_argument("--triggered-by", default=os.getenv("HEAL_TRIGGER_ALERT"),
+                    help="name/id of the SigNoz alert that woke the healer; stamped on the "
+                         "agent.heal trace so the alert and the heal share one story.")
     args = ap.parse_args()
     scenario = SCENARIOS[args.scenario]
 
@@ -167,10 +177,23 @@ def main():
     heal_metrics.init()
     mcp = SigNozMCP(config.MCP_URL)
     controls = Controls()
-    scenario.seed(controls)       # start sick, in this incident's broken state
+    if not args.no_seed:
+        scenario.seed(controls)   # start sick, in this incident's broken state
     policy = heal_policy.Policy()  # the governance gate every action passes through
 
     cycle = time.strftime("%H%M%S")
+
+    # BREAK-ONLY: emit one breaching rollout so a real SigNoz alert can fire, then
+    # exit. The alert-triggered heal is launched separately (see heal_bridge.py).
+    if args.break_only:
+        _banner(scenario.title + "   (BREAK: arming a breaching rollout for SigNoz)")
+        with tracer.start_as_current_span("workload.break", kind=SpanKind.INTERNAL) as bs:
+            bs.set_attribute("heal.scenario", scenario.name)
+            _run_canary(controls, f"break-{cycle}", "heal.canary.pre")
+        telemetry.shutdown()
+        print("\nbreaching telemetry emitted; SigNoz will fire the alert on its next eval.")
+        return
+
     pre = f"heal-{cycle}-pre"
     _banner(scenario.title + "   (SigNoz = sensor + scoreboard)")
     print(f"  policy: {policy.summary()}")
@@ -179,12 +202,23 @@ def main():
     chosen = None
     escalated = None
     label = None
-    with tracer.start_as_current_span("agent.heal", kind=SpanKind.SERVER) as root:
+    # If a SigNoz alert (via heal_bridge) woke us, adopt its trace context so the
+    # alert handoff and the whole heal are ONE distributed trace in SigNoz.
+    parent_ctx = None
+    _tp = os.getenv("TRACEPARENT")
+    if _tp:
+        parent_ctx = TraceContextTextMapPropagator().extract({"traceparent": _tp})
+    with tracer.start_as_current_span("agent.heal", kind=SpanKind.SERVER,
+                                      context=parent_ctx) as root:
         trace_id_hex = format(root.get_span_context().trace_id, "032x")
         root.set_attribute("heal.cycle", cycle)
         root.set_attribute("heal.scenario", scenario.name)
         root.set_attribute("heal.policy.autonomy", policy.autonomy)
         root.set_attribute("service.managed", heal_sensors.TARGET_SERVICE)
+        if args.triggered_by:
+            root.set_attribute("heal.triggered", True)
+            root.set_attribute("heal.trigger.alert", args.triggered_by)
+            print(f"  triggered by SigNoz alert: {args.triggered_by}")
 
         # ---- BREAK IT: a rollout under the injected fault -----------------
         print(f"\n[SETUP]  managed workload is sick: {scenario.name} incident seeded.")
