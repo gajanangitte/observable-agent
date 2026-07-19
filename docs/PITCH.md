@@ -1,6 +1,6 @@
 # Sentinel: turning SigNoz native observability into action
 
-> **Datadog shows you the fire. We help you put it out safely and autonomously for the agentic era.**
+> **The open observability stack already sees the incident and fires the alert. We turn that alert into a safe, automatic fix, built for the agentic era.**
 
 *Seed one pager · built on open telemetry (SigNoz + OpenTelemetry + MCP) · working prototype: [`observable-agent`](../README.md) (this repo)*
 
@@ -13,11 +13,11 @@ them. Agents fail in ways traditional software doesn't: they retry silently and
 double spend tokens, loop and run up an unbounded bill, drift, hallucinate tool
 calls, and cascade across multi step graphs. Observability has caught up fast.
 An open, OTel native stack like **SigNoz** already traces every LLM call, token,
-and dollar. But observability is **passive by design**: it shows you the trace
-*after* the money is gone and the customer is angry. Someone still has to wake up,
-read the dashboard, and fix it by hand.
+and dollar, and fires an alert the moment an SLO breaks. What is missing is the
+layer that *acts* on that alert: today a human still has to wake up, read the
+trace, and fix it by hand.
 
-**Great observability tells you the agent is on fire. Someone still has to put it out.**
+**The alert fires on time. Someone still has to act on it, by hand, at 3am.**
 
 ## The insight
 
@@ -25,7 +25,7 @@ The value is moving one layer up, from *watching* agents to *acting* on them.
 The winners in classic infra weren't the metric stores; they were the control
 planes that **closed the loop**: detect → diagnose → **act** → verify. That layer
 doesn't exist for AI agents yet, and it can't safely be a black box: acting on
-production needs **policy, blast radius limits, rollback, and an audit trail**.
+production needs **policy, blast radius limits, rollback, and an auditable record**.
 
 ## The product
 
@@ -36,7 +36,7 @@ SigNoz + OTel + MCP, and closes the loop:
 - **Senses** agent native SLOs from live traces (retry tax, runaway spend, latency, tool error, task success).
 - **Diagnoses** with a model that reads the incident evidence out of your own telemetry.
 - **Acts within policy**: a governed `detect → diagnose → act → verify → rollback` loop with autonomy levels (observe → suggest → approve → auto), an action allow list, blast radius limits, and a runtime **cost kill switch**.
-- **Proves it**: queries the same telemetry again to confirm the fix, and records an immutable audit trail of *what changed, why it was allowed, and whether it worked.*
+- **Proves it**: queries the same telemetry again to confirm the fix, and records an auditable trail of *what changed, why it was allowed, and whether it worked.*
 
 We don't replace your observability stack, we make it *act*. SigNoz stays the system of record and the scoreboard; we add the **intelligence + action** layer on top, local first and private, so regulated and self hosted teams can run it too.
 
@@ -78,6 +78,7 @@ Instrumentation (OTel/MCP) is distribution, not defensibility. Our moat compound
 
 The prototype in this repo runs the full loop on a **laptop** (self hosted SigNoz + a local model, no cloud, no API keys):
 
+- **SigNoz triggered, end to end:** a real SigNoz **alert** fires the heal and, once the breach clears, moves back to resolved. The alert handoff and the whole governed heal are one distributed trace, so the monitoring system opens and closes the incident.
 - **Retry tax incident (live):** detect → the local model reads the incident via MCP → applies a policy gated fix → verify. **Retry rate 40% → 0%, MTTR ~141s**, the whole cycle a single distributed trace.
 - **Bill shock incident:** a runaway agent trips a per request **cost circuit breaker** that structurally severs the LLM connection, a hard kill switch, verified in telemetry.
 - Every action passes a **policy gate** (autonomy level + risk + reversibility), snapshots state, and **rolls back automatically** if the fix doesn't verify.

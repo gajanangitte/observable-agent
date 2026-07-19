@@ -43,6 +43,16 @@ python self_heal.py                    # heal the retry tax incident
 python self_heal.py --scenario cost    # heal the bill shock / runaway spend incident
 ```
 
+**Hands off, SigNoz triggered.** You do not have to launch the heal yourself. A
+SigNoz **alert** can be the trigger: `heal_bridge.py` watches the alert, launches the
+governed heal inside the alert's own trace when it fires, then waits for SigNoz to
+mark it resolved. The alert opens the incident and the alert closes it, one
+distributed trace from `heal.trigger` all the way to the healed verdict.
+
+```bash
+python heal_bridge.py                  # watch SigNoz and heal when an alert fires
+```
+
 **➡️ Full writeup: [`docs/SELF_HEALING.md`](docs/SELF_HEALING.md)** (architecture,
 both hero traces, the governance model, screenshots, and the honest lessons).
 
@@ -170,6 +180,7 @@ python blog/make_dashboard.py    # creates the dashboard, prints its UUID
 | `config.py` | Env overridable config + illustrative per model cost table |
 | `run_load.py` | Traffic generator (varied SRE questions, incl. an error path) |
 | `self_heal.py` | **Competition project**: governed closed loop orchestrator (`agent.heal` trace); `--scenario {retry,cost}` |
+| `heal_bridge.py` | Turns a **SigNoz alert** into a governed heal (poll + webhook), in the alert's own trace, then watches SigNoz mark it resolved |
 | `heal_policy.py` | **Governance gate**: autonomy levels + per action risk/reversibility/blast radius; the allow list every mutation passes through |
 | `heal_*.py` | Self healing modules: sensors (MCP SLO detectors: retry tax + cost), actuators (policy gated, incl. the cost kill switch), control plane (+ snapshot/rollback), canary rollout, metrics, dashboard |
 | `mcp_client.py` | Streamable HTTP bridge to the SigNoz MCP server |

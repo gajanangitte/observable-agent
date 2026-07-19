@@ -10,8 +10,8 @@ WSL2, the model on Ollama. No cloud, no API keys, no bill.**
 
 > Most "AI + observability" demos stop at *observe*. This one closes the loop to
 > *act*, and then uses the same observability backend to **prove** the fix
-> worked. SigNoz isn't the dashboard you look at afterwards; it's the sensor the
-> agent is wired into.
+> worked. SigNoz isn't the dashboard you look at afterwards; it's the alert that
+> wakes the agent and the sensor it is wired into.
 
 ---
 
@@ -136,6 +136,55 @@ calls per request back under the SLO, healed, grounded in telemetry.
 
 ---
 
+## SigNoz closes the loop: its alert is the trigger
+
+The two runs above start with a command. The real version does not wait for a
+human to type anything. A SigNoz **alert** is the trigger, and that same alert
+resolving is the close.
+
+`heal_bridge.py` is a small long lived service that watches SigNoz. The moment the
+retry tax alert moves to *firing*, the bridge opens a `heal.trigger` span, injects
+its trace context into the heal it launches, and then waits for SigNoz to move that
+same alert back to *resolved*.
+
+```bash
+python heal_bridge.py             # watch SigNoz; heal when the alert fires
+python self_heal.py --break-only  # (in another shell) arm a breaching rollout so it fires
+```
+
+In a live end to end run the alert fired on its own, the bridge caught the
+`inactive → firing` transition, launched the governed heal, and this time the model
+chose `enable_mitigation`, a different but equally valid fix from the retry hero's
+`disable_fault_injection`. That the model picks different valid remedies on
+different runs is the point: the choice is real, driven by the evidence, not
+scripted. Retry rate **40% → 0%**, heal **MTTR 166s**, and then SigNoz flipped the
+alert back to resolved and the bridge recorded the loop closed.
+
+Because the bridge injects its trace context into the heal, the alert handoff and
+the entire heal are **one distributed trace**
+(`076158eaca24f824a2fb943fd978ca7a`):
+
+```
+heal.trigger                     ← SigNoz alert fires (heal_bridge.py)
+└─ agent.heal
+   ├─ heal.canary.pre            BREAK confirmed
+   ├─ heal.detect                DETECT : signoz_aggregate_traces (MCP)
+   ├─ heal.decide                DECIDE : llm.chat + read_incident + enable_mitigation
+   ├─ heal.canary.post           VERIFY : roll out under the fix
+   └─ heal.verify                → retry rate 0, healed
+```
+
+You can open the alert in SigNoz and walk straight down into the heal it caused.
+That is what makes SigNoz more than a dashboard here: its alerting is the
+**trigger** and its query surface is the **verdict**. The monitoring system opens
+the incident and closes it; the agent only decides what to do in between.
+
+> The direct `python self_heal.py` runs stay in the repo because they are faster to
+> demo and reproduce. The alert triggered path is the same heal, with SigNoz holding
+> the trigger instead of a human.
+
+---
+
 ## Governance: every action passes a policy gate
 
 Letting software *act* on production is only safe if the action is constrained.
@@ -166,14 +215,17 @@ it's what separates "act" from "act *safely*".
 
 ## Why this is a good use of SigNoz
 
-SigNoz plays **three roles** in one loop, and because all three read the same telemetry, they share one source of truth:
+SigNoz plays **four roles** in one loop, and because they all read the same telemetry, they share one source of truth:
 
-1. **Sensor**: `heal.detect` asks SigNoz *"did this rollout breach the
+1. **Trigger**: a SigNoz **alert** firing is what wakes the healer in the first
+   place (`heal_bridge.py`), and that same alert moving back to resolved is what
+   closes the incident. SigNoz opens and closes the loop.
+2. **Sensor**: `heal.detect` asks SigNoz *"did this rollout breach the
    retry tax SLO?"* via `signoz_aggregate_traces`. Deterministic. No LLM.
-2. **Diagnostic surface**: the model's `read_incident` tool drills the same
+3. **Diagnostic surface**: the model's `read_incident` tool drills the same
    traces through the **SigNoz MCP server** to build the incident evidence the
    model reasons over.
-3. **Scoreboard**: `heal.verify` queries SigNoz again after the fix. Retry rate
+4. **Scoreboard**: `heal.verify` queries SigNoz again after the fix. Retry rate
    back to zero = healed, and that's what sets MTTR. The verdict is grounded in
    telemetry, not in the model's say so.
 
@@ -224,7 +276,9 @@ rollouts never bleed into each other's SLO math.
 
 | File | Role |
 |---|---|
-| `self_heal.py` | Orchestrator + the `agent.heal` root trace. Governed `detect → decide → act → verify → rollback`, MTTR, outcome. `--scenario {retry,cost}`. |
+| `self_heal.py` | Orchestrator + the `agent.heal` root trace. Governed `detect → decide → act → verify → rollback`, MTTR, outcome. `--scenario {retry,cost}`; `--break-only` arms a breaching rollout and `--no-seed`/`--triggered-by` let a SigNoz alert drive it. |
+| `heal_bridge.py` | The **trigger**: watches SigNoz alert state (plus an Alertmanager webhook), launches the governed heal in the alert's own trace when it fires, then waits for SigNoz to mark the alert resolved. |
+| `heal_alert.py` | Creates or updates the SigNoz alert rule that fires the heal, with a demo tuned eval window, so the trigger is reproducible. |
 | `heal_policy.py` | The **governor**: autonomy levels + per action risk/reversibility/blast radius; `evaluate()` is the gate every mutation passes before it touches the control plane. |
 | `heal_sensors.py` | The **senses**: retry tax, latency, and cost (calls per request) SLO detectors, each a `signoz_aggregate_traces` call wrapped in an `mcp.*` span. Deterministic. |
 | `heal_actuators.py` | The **hands** (all **policy gated**): `read_incident` / `read_cost_incident` (MCP backed evidence) + `disable_fault_injection` / `enable_mitigation` / `set_cost_budget` (and a `switch_model` held for approval), exposed to the model as OpenAI tools. |
