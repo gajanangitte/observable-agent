@@ -65,8 +65,12 @@ _cooldown_until = 0.0
 
 
 def _scenario_for(alert_name):
-    """Map an alert to the incident the healer should chase."""
+    """Map an alert to the incident the healer should chase, or None if the alert
+    is notify-only and must NOT trigger a heal (e.g. the healer's own backstop --
+    letting a failed heal launch another heal would be a feedback loop)."""
     n = (alert_name or "").lower()
+    if "self-healer" in n or "backstop" in n or "auto-resolved" in n:
+        return None
     if "cost" in n or "spend" in n or "bill" in n or "budget" in n:
         return "cost"
     return "retry"
@@ -120,11 +124,14 @@ def _run_heal(scenario, alert_name, carrier):
 def handle_firing(alert_id, alert_name, source):
     """Run one alert-triggered heal episode, then watch the alert resolve."""
     global _busy, _cooldown_until
+    scenario = _scenario_for(alert_name)
+    if scenario is None:
+        # A notify-only alert (e.g. the healer's own backstop) is never a trigger.
+        return
     with _lock:
         if _busy or time.time() < _cooldown_until:
             return
         _busy = True
-    scenario = _scenario_for(alert_name)
     print(f"\n[BRIDGE] ALERT FIRING ({source}): {alert_name!r} -> heal scenario '{scenario}'",
           flush=True)
     try:
@@ -167,7 +174,10 @@ def handle_firing(alert_id, alert_name, source):
 
 
 def trigger_async(alert_id, alert_name, source):
-    """Start a heal episode in the background unless one is already in flight."""
+    """Start a heal episode in the background unless one is already in flight, or
+    the alert is notify-only (no mapped scenario)."""
+    if _scenario_for(alert_name) is None:
+        return False
     with _lock:
         if _busy or time.time() < _cooldown_until:
             return False
