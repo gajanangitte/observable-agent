@@ -32,6 +32,15 @@ def init():
     _m["rollback"] = meter.create_counter(
         "heal.rollback", unit="{rollback}",
         description="Remediations rolled back after a failed verify")
+    _m["decision"] = meter.create_counter(
+        "heal.decision", unit="{decision}",
+        description="How each remediation was decided: memory | llm | fallback | human")
+    _m["recall"] = meter.create_counter(
+        "heal.recall", unit="{lookup}",
+        description="Verified-memory recall lookups, labelled hit or miss")
+    _m["unsafe"] = meter.create_counter(
+        "heal.unsafe_action", unit="{action}",
+        description="Actions applied that violated policy or param bounds (must stay 0)")
     _m["spend"] = meter.create_histogram(
         "heal.cost.spend", unit="USD",
         description="Observed per-request LLM spend per cohort, pre vs post heal")
@@ -66,6 +75,18 @@ def policy(decision, action):
 
 def rollback(action):
     _m["rollback"].add(1, {"action": action})
+
+
+def decision(source, action):
+    _m["decision"].add(1, {"source": source, "action": action or "none"})
+
+
+def recall(result, fingerprint_class):
+    _m["recall"].add(1, {"result": result, "fingerprint": fingerprint_class})
+
+
+def unsafe_action(action, reason):
+    _m["unsafe"].add(1, {"action": action, "reason": reason})
 
 
 def cost_spend(usd, cohort, phase):

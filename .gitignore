@@ -5,6 +5,8 @@ __pycache__/
 
 # runtime + secrets (never commit)
 heal_state.json
+heal_baseline.json
+heal_memory.json
 .signoz_api_key
 *.log
 state.json

@@ -17,6 +17,7 @@ import os
 
 from opentelemetry import trace
 
+import heal_policy
 import heal_sensors
 
 HEAL_COST_BUDGET_USD = float(os.getenv("HEAL_COST_BUDGET_USD", "0.0001") or 0.0001)
@@ -52,6 +53,16 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
         return {"action": name, "applied": False,
                 "held_for_approval": decision.requires_approval,
                 "policy": decision.reason}
+
+    def _reject_params(name, why):
+        """An action cleared the name gate but its ARGUMENTS were out of bounds.
+        Fail closed: touch nothing, stamp the span, and do NOT consume the
+        remediation (the model may pick a valid action instead)."""
+        sp = trace.get_current_span()
+        if sp is not None:
+            sp.set_attribute("heal.param.rejected", True)
+            sp.set_attribute("heal.param.reason", why)
+        return {"action": name, "applied": False, "rejected": True, "reason": why}
 
     def read_incident(**_):
         slo = heal_sensors.retry_slo(mcp, cohort)
@@ -115,7 +126,10 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
         d = _gate("set_cost_budget")
         if d is not None and not d.allow:
             return _held(d, "set_cost_budget")
-        budget = float(usd) if usd else HEAL_COST_BUDGET_USD
+        ok, why, clean = heal_policy.validate_params("set_cost_budget", {"usd": usd})
+        if not ok:
+            return _reject_params("set_cost_budget", why)
+        budget = clean.get("usd", HEAL_COST_BUDGET_USD)
         controls.state["cost_budget_usd"] = budget
         controls.save()
         decisions.append("set_cost_budget")
@@ -130,11 +144,15 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
         d = _gate("switch_model")
         if d is not None and not d.allow:
             return _held(d, "switch_model")
-        controls.state["model"] = to
+        ok, why, clean = heal_policy.validate_params("switch_model", {"to": to})
+        if not ok:
+            return _reject_params("switch_model", why)
+        target = clean.get("to", "llama3.2:1b")
+        controls.state["model"] = target
         controls.save()
-        decisions.append(f"switch_model:{to}")
-        return {"action": "switch_model", "applied": True, "model": to,
-                "effect": f"routed the workload to {to}."}
+        decisions.append(f"switch_model:{target}")
+        return {"action": "switch_model", "applied": True, "model": target,
+                "effect": f"routed the workload to {target}."}
 
     registry = {
         "read_incident": read_cost_incident if "set_cost_budget" in actions else read_incident,

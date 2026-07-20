@@ -44,6 +44,52 @@ ACTION_POLICIES = {
 RISK_ORDER = {"low": 1, "medium": 2, "high": 3}
 AUTONOMY_LEVELS = ("observe", "suggest", "approve", "auto")
 
+# Per-action ARGUMENT bounds. ``ACTION_POLICIES`` above answers "may this action
+# run at all?"; this answers "are the arguments it was called with safe?". An
+# out-of-range dollar budget or an unknown model is rejected exactly like a
+# disallowed action -- so the model cannot, say, set a $1,000,000 "budget" (which
+# would disable the very cost breaker it is arming) or route the workload to an
+# arbitrary/unavailable model.
+PARAM_SPECS = {
+    "set_cost_budget": {
+        "usd": {"type": "float", "min": 0.00001, "max": 1.0},
+    },
+    "switch_model": {
+        "to": {"type": "enum", "allowed": ["llama3.2:1b", "llama3.2:3b", "qwen2.5:3b"]},
+    },
+}
+
+
+def validate_params(action, params):
+    """Validate/sanitise an action's arguments against ``PARAM_SPECS``.
+
+    Returns ``(ok, reason, clean)``. ``clean`` contains only coerced, in-bounds
+    values; an argument left unset is simply omitted (the actuator falls back to
+    its own safe default). An out-of-bounds or wrong-type argument fails closed.
+    """
+    spec = PARAM_SPECS.get(action)
+    params = params or {}
+    if not spec:
+        return True, "no bounded parameters", dict(params)
+    clean = {}
+    for name, rule in spec.items():
+        if name not in params or params[name] is None:
+            continue                       # unset -> actuator uses its safe default
+        val = params[name]
+        if rule["type"] == "float":
+            try:
+                val = float(val)
+            except (TypeError, ValueError):
+                return False, f"{name}={params[name]!r} is not a number", {}
+            if val < rule["min"] or val > rule["max"]:
+                return False, f"{name}={val:g} is outside [{rule['min']:g}, {rule['max']:g}]", {}
+            clean[name] = val
+        elif rule["type"] == "enum":
+            if val not in rule["allowed"]:
+                return False, f"{name}={val!r} is not one of {rule['allowed']}", {}
+            clean[name] = val
+    return True, "arguments within bounds", clean
+
 
 @dataclass
 class Decision:
