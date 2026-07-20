@@ -53,6 +53,17 @@ distributed trace from `heal.trigger` all the way to the healed verdict.
 python heal_bridge.py                  # watch SigNoz and heal when an alert fires
 ```
 
+**Built to be trusted.** Detection and verification never call the model: sensors are
+three state (a blind sensor reports UNKNOWN and refuses to act, never a silent zero),
+and robust distribution free statistics (median/MAD z, EWMA, CUSUM) back the SLO floor,
+so you do not need a neural net to read a metric. The model decides only what to do
+about a confirmed breach, and once SigNoz verifies a fix, the healer remembers it and
+replays it on a recurrence with no model call at all. A chaos harness (`eval.py`) drives
+the real decision core through adversarial episodes and asserts **zero unsafe actions**.
+Local by default (no keys, no egress, no bill), provider neutral so it can escalate only
+the hard decision to a hosted model if you want. More in
+[`docs/SELF_HEALING.md`](docs/SELF_HEALING.md) under *Built to be trusted*.
+
 **➡️ Full writeup: [`docs/SELF_HEALING.md`](docs/SELF_HEALING.md)** (architecture,
 both hero traces, the governance model, screenshots, and the honest lessons).
 

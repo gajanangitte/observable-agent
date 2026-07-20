@@ -215,6 +215,62 @@ it's what separates "act" from "act *safely*".
 
 ---
 
+## Built to be trusted: fast, decisive, and offline by default
+
+An SRE agent that watches production has to be more than a clever demo. Three
+questions decide whether you would actually let it run, and the loop has a
+concrete answer to each.
+
+**Do you even need an LLM to read a metric?** No, and it never does. Detection and
+verification are deterministic. `heal_sensors.py` reads one of three states, PASS,
+BREACH, or UNKNOWN, and the safety property is that a blind sensor (a failed MCP
+query) reports UNKNOWN and the loop refuses to act, it never silently reports a
+healthy zero. On top of the fixed SLO floor, `heal_stats.py` adds distribution
+free anomaly detection over the service's own SigNoz derived history: a median and
+MAD modified z score, an EWMA baseline, and a CUSUM change detector for a small but
+persistent drift a single point test would miss. That is pure stdlib math,
+deterministic, and instant. You do not need a neural network to know a metric is
+out of character, you need robust statistics, and a sub floor anomaly is escalated
+to a human rather than auto healed. The model is asked exactly one thing: given a
+confirmed breach, what should we do. Everything on the reliability hot path is
+model free and fast.
+
+**Does it get faster and more decisive over time?** Yes, it learns. The first time
+an incident class appears, the local model reads the SigNoz evidence and chooses a
+fix. Only after SigNoz *verifies* the fix worked is that (fingerprint to action)
+pair written to `heal_memory.py` as a proven record. The next time the same class
+appears, the healer recalls the known good fix and replays it with no model call at
+all, still through the policy gate, still verified against SigNoz afterward. The
+incident identity is a deterministic fingerprint (`heal_fingerprint.py`), a pure
+function of the breach evidence, so recall never drifts. In the run captured for
+this writeup the retry tax was recalled from memory (proven twice) and healed in
+41s with the decision source recorded as `memory`, not `llm`. This is a
+deterministic lookup and replay of proven fixes, not an exploring bandit: only
+verified heals are ever stored, and recall is gated on severity.
+
+**Why local, when every model is in the cloud?** Because an always on agent that
+reads production telemetry is exactly where local inference earns its keep: no API
+keys, no data egress, and zero marginal cost per heal. The default is `qwen2.5:3b`
+on Ollama and the whole loop runs offline. The agent is provider neutral though, it
+speaks to any OpenAI compatible endpoint, so tiered routing (`config.py`) can
+escalate the single hard decision to a stronger hosted model when you want it,
+while detection, verification, memory recall, and every other step stay local.
+Privacy and cost and availability by default, cloud reach when a decision is worth
+it.
+
+And none of this rests on two happy path runs. `eval.py` is a chaos harness that
+drives the real hardened decision core across a randomized suite of adversarial
+episodes: a healthy service that must not be touched, a blind sensor the healer
+must refuse to act on, a remediation that fails to clear the breach (forcing a
+verified rollback and a second attempt), an unfixable incident, a sub floor
+statistical anomaly that must stay human in the loop, and a recurrence that must be
+recalled from memory with no model call. The suite asserts **zero unsafe actions**.
+Combined with the policy gate, the rollback, and a **backstop SigNoz alert** that
+fires if a heal ever fails to resolve, failure is contained and observable, never
+silent.
+
+---
+
 ## Why this is a good use of SigNoz
 
 SigNoz plays **four roles** in one loop, and because they all read the same telemetry, they share one source of truth:
@@ -282,12 +338,19 @@ rollouts never bleed into each other's SLO math.
 | `heal_bridge.py` | The **trigger**: watches SigNoz alert state (plus an Alertmanager webhook), launches the governed heal in the alert's own trace when it fires, then waits for SigNoz to mark the alert resolved. |
 | `heal_alert.py` | Creates or updates the SigNoz alert rule that fires the heal, with a demo tuned eval window, so the trigger is reproducible. |
 | `heal_policy.py` | The **governor**: autonomy levels + per action risk/reversibility/blast radius; `evaluate()` is the gate every mutation passes before it touches the control plane. |
-| `heal_sensors.py` | The **senses**: retry tax, latency, and cost (calls per request) SLO detectors, each a `signoz_aggregate_traces` call wrapped in an `mcp.*` span. Deterministic. |
+| `heal_sensors.py` | The **senses**: retry tax, latency, and cost (calls per request) SLO detectors, each a `signoz_aggregate_traces` call wrapped in an `mcp.*` span. **Three state** (PASS / BREACH / UNKNOWN, never a silent zero) and deterministic; a failed query refuses to heal. |
+| `heal_stats.py` | **Robust statistics** supplement to the fixed SLO floor: median/MAD z score, EWMA baseline, and a CUSUM drift detector over the service's own history. Pure stdlib, deterministic, no neural net. A sub floor anomaly escalates to a human. |
+| `heal_baseline.py` | Persisted ring buffer of the healer's own **healthy** SigNoz readings, the distribution `heal_stats` judges against. Breaching readings are never appended, so an incident cannot poison its own baseline. |
+| `heal_memory.py` | **Verified remediation memory** (the learning loop): a (fingerprint to action) pair is stored only after SigNoz confirms the fix worked, then recalled and replayed on a recurrence with **no model call**. |
+| `heal_fingerprint.py` | **Deterministic incident identity**: a pure function of the breach evidence (never the model's opinion), the stable key `heal_memory` recalls on. |
 | `heal_actuators.py` | The **hands** (all **policy gated**): `read_incident` / `read_cost_incident` (MCP backed evidence) + `disable_fault_injection` / `enable_mitigation` / `set_cost_budget` (and a `switch_model` held for approval), exposed to the model as OpenAI tools. |
 | `heal_controls.py` | The **control plane** (`heal_state.json`) shared by healer and canary; `snapshot()`/`restore()` back the rollback; `canary_env()` is the seam between them. |
 | `heal_canary.py` | The **managed workload rollout**: runs the observable-agent under a cohort tag as a subprocess. |
-| `heal_metrics.py` | Healer instruments: `heal.slo.breach`, `heal.action`, `heal.result`, `heal.mttr`, `heal.retry_rate`, `heal.policy`, `heal.rollback`, `heal.cost.*`. |
+| `heal_metrics.py` | Healer instruments: `heal.slo.breach`, `heal.action`, `heal.result`, `heal.mttr`, `heal.retry_rate`, `heal.policy`, `heal.rollback`, `heal.decision` (source: memory / llm / fallback), `heal.recall`, `heal.unsafe_action` (must stay 0), `heal.cost.*`, and the `heal.eval.*` suite. |
 | `heal_dashboard.py` | Builds the Self Healing dashboard via the SigNoz v5 dashboards API. |
+| `dashboard_fullsignal.py` | The **Track 02** dashboard: one Query Builder view of the loop across traces + metrics + logs; self verifies every panel, then exports importable JSON. See [`TRACK02.md`](TRACK02.md). |
+| `config.py` | Provider neutral model config: local `qwen2.5:3b` by default (offline, no keys), with optional **tiered routing** that can escalate only the hard decision to a hosted OpenAI compatible model. |
+| `eval.py` | **Chaos / eval harness**: drives the real hardened decision core across a randomized suite of adversarial episodes and asserts zero unsafe actions. |
 
 ---
 
@@ -325,10 +388,18 @@ detect the breach via MCP → have the local model read the incident and pick a
 if the breach didn't clear) → print the timeline, MTTR, and a link to the
 `agent.heal` trace in SigNoz.
 
-Then rebuild the dashboard any time with:
+Then rebuild the dashboards any time with:
 
 ```bash
-python heal_dashboard.py     # prints the dashboard UUID
+python heal_dashboard.py         # the Self Healing dashboard (traces)
+python dashboard_fullsignal.py   # the Track 02 view: traces + metrics + logs
+```
+
+And prove the decision core is robust, not just lucky, with the chaos harness:
+
+```bash
+python eval.py --no-export       # randomized adversarial episodes; asserts 0 unsafe
+python tests/run_all.py          # the unit suite
 ```
 
 ---
@@ -376,8 +447,17 @@ The brief taken literally: *close the loop from diagnose to act*:
   risk + reversibility); risky actions are held for approval, and a fix that
   fails to verify is rolled back. Action without governance is a liability, this
   is action *with* it.
+- **It learns, and it is proven robust.** A SigNoz verified fix becomes memory and
+  is replayed deterministically on a recurrence with no model call; a chaos harness
+  (`eval.py`) drives the real decision core through adversarial episodes and asserts
+  zero unsafe actions. Fast, decisive, and offline by default (see *Built to be
+  trusted* above).
 - **Honest about the hard parts.** Small model tool calling, the observer effect,
   and keeping the LLM out of the reliability hot path are documented, not hidden.
+
+It also reaches into **Track T02**: [`TRACK02.md`](TRACK02.md) ships a single Query
+Builder dashboard that reads the same loop from all three signals (traces, metrics,
+and logs), exported as importable JSON.
 
 ---
 
@@ -385,5 +465,9 @@ The brief taken literally: *close the loop from diagnose to act*:
 
 Traces (GenAI semantic convention span trees) · custom attribute filtering &
 aggregation via the **MCP server** (`signoz_aggregate_traces`) · metrics
-(healer instruments) · the **v5 dashboards API** · service scoped queries. The
-loop is built *on* SigNoz's query surface, not just pointed at it.
+(healer instruments) · **structured logs** (trace correlated, one lifecycle line
+per heal step) · **formula / ratio alerts** (retry rate and cost per request as
+`A / B` against the SLO, plus a self healer backstop) that act as the loop's
+**trigger** · the **v5 dashboards API** across all three signals ([`TRACK02.md`](TRACK02.md))
+· service scoped queries. The loop is built *on* SigNoz's query surface, not just
+pointed at it.
