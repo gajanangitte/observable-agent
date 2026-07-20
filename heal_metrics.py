@@ -47,6 +47,16 @@ def init():
     _m["cpr"] = meter.create_histogram(
         "heal.cost.calls_per_request", unit="1",
         description="Observed llm.chat calls per request per cohort, pre vs post heal")
+    # ---- eval / chaos harness -------------------------------------------
+    _m["eval_episode"] = meter.create_counter(
+        "heal.eval.episode", unit="{episode}",
+        description="Eval episodes by scenario, outcome, and decision source")
+    _m["eval_mttr"] = meter.create_histogram(
+        "heal.eval.mttr", unit="ms",
+        description="Eval per-episode simulated MTTR (breach detected -> verified)")
+    _m["eval_rate"] = meter.create_histogram(
+        "heal.eval.rate", unit="1",
+        description="Eval suite scoreboard rates (0..1), labelled by metric name")
 
 
 def breach(slo, cohort):
@@ -95,3 +105,16 @@ def cost_spend(usd, cohort, phase):
 
 def calls_per_request(value, cohort, phase):
     _m["cpr"].record(value, {"cohort": cohort, "phase": phase})
+
+
+def eval_episode(scenario, outcome, decider):
+    _m["eval_episode"].add(1, {"scenario": scenario, "outcome": outcome,
+                               "decider": decider or "none"})
+
+
+def eval_mttr(ms, scenario):
+    _m["eval_mttr"].record(ms, {"scenario": scenario})
+
+
+def eval_rate(metric, value):
+    _m["eval_rate"].record(value, {"metric": metric})
