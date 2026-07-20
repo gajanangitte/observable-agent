@@ -150,7 +150,7 @@ spec:
       enabled: true
       env:
         SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
-      image: signoz/signoz-otel-collector:latest
+      image: signoz/signoz-otel-collector:latest@sha256:7e4e539a73f1f88fbc1cd7e659ab3950908e83ce1f2a37a297452f910d072174
       version: latest
     status:
       addresses:
@@ -302,7 +302,7 @@ spec:
         replicas: 1
       config: {}
       enabled: false
-      image: signoz/signoz-mcp-server:latest
+      image: signoz/signoz-mcp-server:latest@sha256:728eacf81f6f7159707e343230fd3553fb02301e4e04610ae18e7f0515d6d3b2
       version: latest
     status:
       addresses:
@@ -341,7 +341,7 @@ spec:
         SIGNOZ_SQLSTORE_PROVIDER: postgres
         SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
         SIGNOZ_TELEMETRYSTORE_PROVIDER: clickhouse
-      image: signoz/signoz:latest
+      image: signoz/signoz:latest@sha256:588a8ea3deeab1a6a4cb42261607457c36eee6ffbb510184880f1f826be4b646
       version: latest
     status:
       addresses:
