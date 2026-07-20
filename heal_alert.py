@@ -45,7 +45,11 @@ HEALER_SERVICE = "self-healer"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASE = os.getenv("SIGNOZ_UI", "http://localhost:8080").rstrip("/")
-KEY = (Path(HERE) / ".signoz_api_key").read_text().strip()
+# Read lazily-tolerant: the alert SPECS need no key (only the HTTP calls do), so a
+# fresh clone without .signoz_api_key can still import this module and unit-test the
+# spec shapes. The key is required only when actually talking to SigNoz.
+_KEYFILE = Path(HERE) / ".signoz_api_key"
+KEY = _KEYFILE.read_text().strip() if _KEYFILE.exists() else ""
 
 # Names are stable identities: keep the retry name as first deployed so --ensure
 # updates it in place instead of orphaning the old rule.
