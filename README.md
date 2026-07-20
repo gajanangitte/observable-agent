@@ -184,7 +184,9 @@ python blog/make_dashboard.py    # creates the dashboard, prints its UUID
 | `heal_policy.py` | **Governance gate**: autonomy levels + per action risk/reversibility/blast radius; the allow list every mutation passes through |
 | `heal_*.py` | Self healing modules: sensors (MCP SLO detectors: retry tax + cost), actuators (policy gated, incl. the cost kill switch), control plane (+ snapshot/rollback), canary rollout, metrics, dashboard |
 | `mcp_client.py` | Streamable HTTP bridge to the SigNoz MCP server |
+| `dashboard_fullsignal.py` | **Track 02** builder: one dashboard that reads the heal loop from traces + metrics + logs; self verifies every panel, then exports importable JSON |
 | `docs/SELF_HEALING.md` | Competition project writeup + hero run screenshots |
+| `docs/TRACK02.md` | Signals and Dashboards writeup: the three signal dashboard, its nine panels, and the Query Builder techniques |
 | `blog/` | Blog posts, screenshots, and the SigNoz login/dashboard/capture scripts |
 
 ## Notes on honesty
