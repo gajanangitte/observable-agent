@@ -35,7 +35,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from opentelemetry import trace
-from opentelemetry.trace import SpanKind, Status, StatusCode
+from opentelemetry.trace import (Link, SpanContext, SpanKind, Status, StatusCode,
+                                 TraceFlags)
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 import telemetry
@@ -61,7 +62,38 @@ tracer = trace.get_tracer("self-healer")
 
 _lock = threading.Lock()
 _busy = False
-_cooldown_until = 0.0
+# Cooldown is keyed per alert so a just-healed retry alert does not muzzle a
+# distinct cost alert; a single global _busy still serialises the actual heals.
+_cooldown_until = {}
+_INCIDENT_TRACE_FILE = Path(HERE) / ".last_incident_trace"
+_INCIDENT_MAX_AGE_S = float(os.getenv("HEAL_INCIDENT_MAX_AGE_S", "1800"))
+
+
+def _alert_key(alert_id, alert_name):
+    return str(alert_id) if alert_id else (alert_name or "unknown")
+
+
+def _incident_link():
+    """Build an OTel Link from the heal to the app trace that triggered it, using
+    the trace id the breaching workload dropped in .last_incident_trace. Returns
+    (Link | None, trace_id_hex | None). Best-effort: never fatal."""
+    try:
+        if not _INCIDENT_TRACE_FILE.exists():
+            return None, None
+        d = json.loads(_INCIDENT_TRACE_FILE.read_text())
+        if time.time() - float(d.get("ts", 0)) > _INCIDENT_MAX_AGE_S:
+            return None, None                      # stale: unrelated older incident
+        tid = int(d["trace_id"], 16)
+        sid = int(d["span_id"], 16)
+        if not tid or not sid:
+            return None, None
+        ctx = SpanContext(trace_id=tid, span_id=sid, is_remote=True,
+                          trace_flags=TraceFlags(TraceFlags.SAMPLED))
+        return (Link(ctx, {"link.kind": "triggering_incident",
+                           "service.name": d.get("service", "observable-agent")}),
+                d["trace_id"])
+    except Exception:  # noqa: BLE001
+        return None, None
 
 
 def _scenario_for(alert_name):
@@ -123,23 +155,32 @@ def _run_heal(scenario, alert_name, carrier):
 
 def handle_firing(alert_id, alert_name, source):
     """Run one alert-triggered heal episode, then watch the alert resolve."""
-    global _busy, _cooldown_until
+    global _busy
     scenario = _scenario_for(alert_name)
     if scenario is None:
         # A notify-only alert (e.g. the healer's own backstop) is never a trigger.
         return
+    key = _alert_key(alert_id, alert_name)
     with _lock:
-        if _busy or time.time() < _cooldown_until:
+        if _busy or time.time() < _cooldown_until.get(key, 0.0):
             return
         _busy = True
     print(f"\n[BRIDGE] ALERT FIRING ({source}): {alert_name!r} -> heal scenario '{scenario}'",
           flush=True)
     try:
-        with tracer.start_as_current_span("heal.trigger", kind=SpanKind.CONSUMER) as span:
+        link, incident_tid = _incident_link()
+        links = [link] if link else []
+        with tracer.start_as_current_span("heal.trigger", kind=SpanKind.CONSUMER,
+                                          links=links) as span:
             span.set_attribute("alert.id", str(alert_id))
             span.set_attribute("alert.name", str(alert_name))
             span.set_attribute("alert.source", source)
             span.set_attribute("heal.scenario", scenario)
+            if incident_tid:
+                # The app trace that tripped the SLO -> one click from heal to cause.
+                span.set_attribute("heal.incident.trace_id", incident_tid)
+                print(f"[BRIDGE] linked heal to triggering incident trace {incident_tid}",
+                      flush=True)
             carrier = {}
             TraceContextTextMapPropagator().inject(carrier)  # -> the heal subprocess
             t0 = time.time()
@@ -170,7 +211,7 @@ def handle_firing(alert_id, alert_name, source):
     finally:
         with _lock:
             _busy = False
-            _cooldown_until = time.time() + COOLDOWN_S
+            _cooldown_until[key] = time.time() + COOLDOWN_S
 
 
 def trigger_async(alert_id, alert_name, source):
@@ -178,8 +219,9 @@ def trigger_async(alert_id, alert_name, source):
     the alert is notify-only (no mapped scenario)."""
     if _scenario_for(alert_name) is None:
         return False
+    key = _alert_key(alert_id, alert_name)
     with _lock:
-        if _busy or time.time() < _cooldown_until:
+        if _busy or time.time() < _cooldown_until.get(key, 0.0):
             return False
     threading.Thread(target=handle_firing, args=(alert_id, alert_name, source),
                      daemon=True).start()

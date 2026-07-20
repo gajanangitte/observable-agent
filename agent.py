@@ -12,6 +12,7 @@ The LLM runs locally on Ollama; traces/metrics/logs stream to SigNoz via OTLP.
 """
 import json
 import logging
+import os
 import sys
 import threading
 import time
@@ -35,6 +36,27 @@ SYSTEM_PROMPT = (
 )
 
 MAX_STEPS = 5
+
+_INCIDENT_TRACE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".last_incident_trace")
+
+
+def _record_incident_trace(span, reason):
+    """Best-effort: stamp the current (breaching) span so the SigNoz-triggered
+    healer can LINK its heal.trigger span back to the incident that caused it.
+    The workload and the healer share the repo dir, so a tiny JSON file is the
+    simplest dependency-free handoff. Never fatal."""
+    try:
+        ctx = span.get_span_context()
+        if not ctx or not ctx.trace_id:
+            return
+        with open(_INCIDENT_TRACE_FILE, "w") as f:
+            json.dump({"trace_id": format(ctx.trace_id, "032x"),
+                       "span_id": format(ctx.span_id, "016x"),
+                       "service": os.getenv("OTEL_SERVICE_NAME", "observable-agent"),
+                       "reason": reason, "ts": time.time()}, f)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class Agent:
@@ -106,6 +128,7 @@ class Agent:
                     backoff_ms = config.RETRY_BACKOFF_MS * attempt
                     span.set_attribute("fault.injected", True)
                     span.set_attribute("retry.reason", "response_dropped")
+                    _record_incident_trace(span, "response_dropped")
                     span.add_event("retry.scheduled",
                                    {"retry.reason": "response_dropped",
                                     "retry.backoff_ms": backoff_ms,

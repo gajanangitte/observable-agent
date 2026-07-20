@@ -27,3 +27,6 @@ blog/x_*.py
 blog/shots_form/
 blog/shots_x/
 _demo_build/
+
+# runtime handoff: latest breaching trace id for the heal span link
+.last_incident_trace
