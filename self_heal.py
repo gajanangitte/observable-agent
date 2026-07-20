@@ -344,11 +344,18 @@ def main():
             if mem is None:
                 heal_metrics.recall("miss", fp_obj.class_id if fp_obj else "unknown")
                 # ---- DIAGNOSE + DECIDE (the agentic step, via MCP) -------
-                print(f"\n[DIAGNOSE] attempt {attempt}: local {config.MODEL} reads the incident "
-                      f"via MCP and decides on a fix...")
+                # Tiered routing: the local model decides by default. If a prior
+                # attempt's fix did not hold AND a cloud escalation tier is
+                # configured, escalate THIS decision to the stronger hosted model.
+                # With no cloud tier set (the default) this always stays local, so
+                # the loop is fully offline.
+                route = "escalation" if (config.ESCALATION_ENABLED and attempt > 1) else "local"
+                eff_tier = config.tier(route)["name"]
+                print(f"\n[DIAGNOSE] attempt {attempt}: {eff_tier} model {config.tier(route)['model']} "
+                      f"reads the incident via MCP and decides on a fix...")
                 healer = Agent(tool_schemas=schemas, registry=registry,
                                system_prompt=scenario.system, root_span="heal.decide",
-                               temperature=0.0)
+                               temperature=0.0, tier=route)
                 try:
                     healer.invoke(scenario.task.format(cohort=pre))
                 except Exception as e:  # noqa: BLE001
@@ -360,6 +367,7 @@ def main():
 
                 chosen = next((d for d in decisions if d != "read_incident"), None)
                 decider = "llm"   # the model chose from the evidence (default path)
+                root.set_attribute("heal.decider.tier", eff_tier)
                 if not chosen:
                     held = [d for d in gate_log if not d.allow and d.requires_approval]
                     if held:

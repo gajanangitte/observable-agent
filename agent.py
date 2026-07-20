@@ -39,8 +39,16 @@ MAX_STEPS = 5
 
 class Agent:
     def __init__(self, tool_schemas=None, registry=None, system_prompt=None,
-                 root_span="agent.invoke", temperature=0.1):
-        self.client = OpenAI(base_url=config.OLLAMA_BASE_URL, api_key=config.OLLAMA_API_KEY)
+                 root_span="agent.invoke", temperature=0.1, tier=None):
+        # Provider-neutral tiered routing: 'local' (default, offline) or
+        # 'escalation' (an opt-in hosted model). An unconfigured escalation tier
+        # transparently resolves back to local, so callers never network off-box
+        # unless it was explicitly set up.
+        t = config.tier(tier or "local")
+        self._model = t["model"]
+        self._genai_system = t["system"]
+        self._tier = t["name"]
+        self.client = OpenAI(base_url=t["base_url"], api_key=t["api_key"])
         self._chaos = threading.local()
         self._req = threading.local()   # per-request cost/call accumulator (breaker)
         # Default to the built-in SRE tools; the introspection agent injects its
@@ -62,16 +70,17 @@ class Agent:
         max_attempts = max(config.LLM_MAX_ATTEMPTS, 2 if config.CHAOS_DROP_ONCE else 1)
         for attempt in range(1, max_attempts + 1):
             with tracer.start_as_current_span("llm.chat", kind=SpanKind.CLIENT) as span:
-                span.set_attribute("gen_ai.system", "ollama")
-                span.set_attribute("gen_ai.request.model", config.MODEL)
+                span.set_attribute("gen_ai.system", self._genai_system)
+                span.set_attribute("gen_ai.request.model", self._model)
                 span.set_attribute("gen_ai.operation.name", "chat")
                 span.set_attribute("llm.attempt", attempt)
+                span.set_attribute("llm.tier", self._tier)
                 if config.EXPERIMENT_ID:
                     span.set_attribute("experiment.id", config.EXPERIMENT_ID)
                 start = time.perf_counter()
                 try:
                     resp = self.client.chat.completions.create(
-                        model=config.MODEL,
+                        model=self._model,
                         messages=messages,
                         tools=self._tool_schemas,
                         temperature=self._temperature,
@@ -80,7 +89,7 @@ class Agent:
                 except Exception as e:
                     span.set_status(Status(StatusCode.ERROR, str(e)))
                     span.record_exception(e)
-                    telemetry.record_llm(config.MODEL, 0, 0, (time.perf_counter() - start) * 1000, "error")
+                    telemetry.record_llm(self._model, 0, 0, (time.perf_counter() - start) * 1000, "error")
                     raise
                 latency_ms = (time.perf_counter() - start) * 1000
                 usage = resp.usage
@@ -92,8 +101,8 @@ class Agent:
                 # (status="dropped") -- that is the wasted work of the retry.
                 if attempt < max_attempts and getattr(self._chaos, "armed", False):
                     self._chaos.armed = False
-                    telemetry.record_llm(config.MODEL, in_tok, out_tok, latency_ms, "dropped")
-                    telemetry.record_retry(config.MODEL, "response_dropped")
+                    telemetry.record_llm(self._model, in_tok, out_tok, latency_ms, "dropped")
+                    telemetry.record_retry(self._model, "response_dropped")
                     backoff_ms = config.RETRY_BACKOFF_MS * attempt
                     span.set_attribute("fault.injected", True)
                     span.set_attribute("retry.reason", "response_dropped")
@@ -109,20 +118,20 @@ class Agent:
                     time.sleep(backoff_ms / 1000.0)
                     continue
 
-                cost = telemetry.record_llm(config.MODEL, in_tok, out_tok, latency_ms)
+                cost = telemetry.record_llm(self._model, in_tok, out_tok, latency_ms)
                 # Feed the per-request cost circuit-breaker (see invoke()).
                 self._req.cost = getattr(self._req, "cost", 0.0) + cost
                 self._req.calls = getattr(self._req, "calls", 0) + 1
                 choice = resp.choices[0]
-                span.set_attribute("gen_ai.response.model", resp.model or config.MODEL)
+                span.set_attribute("gen_ai.response.model", resp.model or self._model)
                 span.set_attribute("gen_ai.response.finish_reason", choice.finish_reason or "")
                 if attempt > 1:
                     span.set_attribute("llm.was_retry", True)
                 if choice.message.content:
                     span.add_event("gen_ai.content.completion",
                                    {"content": choice.message.content[:500]})
-                log.info("llm.chat model=%s attempt=%d in=%d out=%d cost=$%.6f %.0fms",
-                         config.MODEL, attempt, in_tok, out_tok, cost, latency_ms)
+                log.info("llm.chat model=%s tier=%s attempt=%d in=%d out=%d cost=$%.6f %.0fms",
+                         self._model, self._tier, attempt, in_tok, out_tok, cost, latency_ms)
                 return choice.message
         # Unreachable: the injection always leaves a final attempt to succeed.
         raise RuntimeError("llm.chat exhausted all attempts")
@@ -176,7 +185,7 @@ class Agent:
                 "cost.budget_usd": round(budget, 6),
                 "cost.spent_usd": round(spent, 6),
                 "llm.calls": calls})
-            telemetry.record_cost_break(config.MODEL, spent, budget)
+            telemetry.record_cost_break(self._model, spent, budget)
             log.warning("cost circuit-breaker TRIPPED: $%.6f >= budget $%.6f after %d calls; "
                         "severing further llm.chat for this request", spent, budget, calls)
         return True
@@ -196,7 +205,8 @@ class Agent:
     def invoke(self, question: str) -> str:
         with tracer.start_as_current_span(self._root_span, kind=SpanKind.SERVER) as span:
             span.set_attribute("agent.question", question)
-            span.set_attribute("gen_ai.request.model", config.MODEL)
+            span.set_attribute("gen_ai.request.model", self._model)
+            span.set_attribute("llm.tier", self._tier)
             if config.EXPERIMENT_ID:
                 span.set_attribute("experiment.id", config.EXPERIMENT_ID)
             if config.COST_BUDGET_USD > 0:

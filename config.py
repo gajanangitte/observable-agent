@@ -9,13 +9,49 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- LLM (OpenAI-compatible endpoint; Ollama exposes one at :11434/v1) --------
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "ollama")  # Ollama ignores the value
+# --- LLM: provider-neutral, OpenAI-compatible (Ollama, vLLM, OpenAI, ...) ------
+# The agent talks to ANY OpenAI-compatible chat endpoint. It defaults to a LOCAL
+# model (Ollama at :11434) on purpose: the whole loop then runs offline, for free,
+# with no telemetry leaving the box -- the right default for a POC and for
+# privacy-sensitive observability data. Point GENAI_BASE_URL at vLLM, OpenAI,
+# Together, Groq, etc. to run the exact same code against a hosted model.
+GENAI_BASE_URL = os.getenv("GENAI_BASE_URL",
+                           os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"))
+GENAI_API_KEY = os.getenv("GENAI_API_KEY", os.getenv("OLLAMA_API_KEY", "ollama"))
+GENAI_SYSTEM = os.getenv("GENAI_SYSTEM", "ollama")   # the gen_ai.system span attribute
 MODEL = os.getenv("AGENT_MODEL", "llama3.2:3b")
+
+# Back-compat aliases: older modules referenced these names directly.
+OLLAMA_BASE_URL = GENAI_BASE_URL
+OLLAMA_API_KEY = GENAI_API_KEY
 # Cap the model's response length. Local CPU generation is the slow part, so a
 # bound keeps traces snappy without truncating a normal SRE answer.
 MAX_OUTPUT_TOKENS = int(os.getenv("AGENT_MAX_OUTPUT_TOKENS", "300"))
+
+# --- Optional cloud escalation tier (opt-in; the agent stays local-first) ------
+# Local models are cheap, private and fast enough for the vast majority of
+# decisions. For the rare case where the local model's fix does NOT hold on
+# verify, the healer can escalate the DECISION (never the detection) to a stronger
+# hosted model -- but ONLY if one is configured here. With these unset (the
+# default) the agent never makes an off-box call: escalation is disabled and it is
+# fully offline. That is the tiered-routing answer to "why a local model?": local
+# by default for cost, privacy and latency; cloud on demand, governed and traced.
+ESCALATION_MODEL = os.getenv("GENAI_ESCALATION_MODEL", "")
+ESCALATION_BASE_URL = os.getenv("GENAI_ESCALATION_BASE_URL", "")
+ESCALATION_API_KEY = os.getenv("GENAI_ESCALATION_API_KEY", "")
+ESCALATION_SYSTEM = os.getenv("GENAI_ESCALATION_SYSTEM", "openai")
+ESCALATION_ENABLED = bool(ESCALATION_MODEL and ESCALATION_BASE_URL and ESCALATION_API_KEY)
+
+
+def tier(name):
+    """Resolve a routing tier to a concrete endpoint. The ``local`` tier is always
+    available; ``escalation`` falls back to local unless a cloud tier is fully
+    configured, so calling code can ask for escalation without first checking."""
+    if name == "escalation" and ESCALATION_ENABLED:
+        return {"base_url": ESCALATION_BASE_URL, "api_key": ESCALATION_API_KEY,
+                "model": ESCALATION_MODEL, "system": ESCALATION_SYSTEM, "name": "escalation"}
+    return {"base_url": GENAI_BASE_URL, "api_key": GENAI_API_KEY,
+            "model": MODEL, "system": GENAI_SYSTEM, "name": "local"}
 
 # --- Chaos / reliability experiment knobs ------------------------------------
 # EXPERIMENT_ID tags every span + metric so "control" and "chaos" cohorts are
