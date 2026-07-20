@@ -50,6 +50,8 @@ import heal_metrics
 import heal_sensors
 import heal_actuators
 import heal_policy
+import heal_fingerprint
+import heal_memory
 from heal_controls import Controls, BROKEN, BROKEN_COST
 from mcp_client import SigNozMCP
 from agent import Agent
@@ -156,6 +158,26 @@ def _run_canary(controls, cohort, span_name):
             print("    canary stderr:", (proc.stderr or "")[:300])
 
 
+def _settle_read(sensor, mcp, cohort, min_calls, tries=6, sleep_s=5):
+    """Wait for a cohort's telemetry, then read its SLO -- retrying ONLY while the
+    sensor is UNKNOWN because ingestion has not caught up (retryable). A sensor
+    that is blind because MCP is down (not retryable) returns immediately, so the
+    loop can refuse to act rather than spin on a dead backend."""
+    heal_sensors.wait_for_cohort(mcp, cohort, min_calls=min_calls)
+    slo = sensor(mcp, cohort)
+    n = 0
+    while slo.get("status") == heal_sensors.STATUS_UNKNOWN and slo.get("retryable") and n < tries:
+        time.sleep(sleep_s)
+        slo = sensor(mcp, cohort)
+        n += 1
+    return slo
+
+
+def _base_action(action):
+    """Normalise a chosen action to its registry base name (drop any ':arg')."""
+    return (action or "").split(":", 1)[0]
+
+
 def main():
     ap = argparse.ArgumentParser(description="Self-healing SRE sidekick (SigNoz control loop)")
     ap.add_argument("--scenario", default=os.getenv("HEAL_SCENARIO", "retry"),
@@ -202,6 +224,8 @@ def main():
     chosen = None
     escalated = None
     label = None
+    fp_obj = None
+    decider = None
     # If a SigNoz alert (via heal_bridge) woke us, adopt its trace context so the
     # alert handoff and the whole heal are ONE distributed trace in SigNoz.
     parent_ctx = None
@@ -227,12 +251,30 @@ def main():
         # ---- DETECT -------------------------------------------------------
         print("\n[DETECT] asking SigNoz (via MCP) whether the rollout breached its SLO...")
         with tracer.start_as_current_span("heal.detect", kind=SpanKind.INTERNAL) as ds:
-            heal_sensors.wait_for_cohort(mcp, pre, min_calls=scenario.min_calls)
-            slo = scenario.sensor(mcp, pre)
+            slo = _settle_read(scenario.sensor, mcp, pre, scenario.min_calls)
             ds.set_attribute("slo.name", slo["slo"])
+            ds.set_attribute("slo.status", slo["status"])
             ds.set_attribute("slo.breached", slo["breached"])
+            if "sigma" in slo:
+                ds.set_attribute("slo.sigma", slo["sigma"])
+                ds.set_attribute("slo.baseline", slo["baseline"])
+            if slo.get("fingerprint"):
+                fp_obj = heal_fingerprint.Fingerprint(**slo["fingerprint"])
+                for k, v in fp_obj.as_attrs().items():
+                    ds.set_attribute(k, v)
             print("  " + slo["headline"])
-        if not slo["breached"]:
+
+        # A blind sensor (MCP down) must NEVER be read as 'healthy'. If we cannot
+        # see, we cannot claim there is nothing to heal -- surface it and stop.
+        if slo["status"] == heal_sensors.STATUS_UNKNOWN and not slo.get("retryable"):
+            root.set_attribute("heal.sensor_blind", True)
+            root.set_status(Status(StatusCode.ERROR, "sensor blind: " + slo.get("reason", "")))
+            _banner("SENSOR BLIND -- REFUSING TO ACT")
+            print(f"  {slo['headline']}")
+            print("  the healer will not act while it cannot observe the workload.")
+            telemetry.shutdown()
+            return
+        if slo["status"] != heal_sensors.STATUS_BREACH:
             print("  no breach detected -- nothing to heal. (Is the fault firing?)")
             root.set_status(Status(StatusCode.OK))
             telemetry.shutdown()
@@ -241,6 +283,18 @@ def main():
         scenario.record(slo, pre, "pre")
         label, pre_str, _ = scenario.value_of(slo)
         root.set_attribute("heal.breach", pre_str)
+        if slo.get("fingerprint"):
+            root.set_attribute("heal.fingerprint.class", slo["fingerprint"]["class_id"])
+            root.set_attribute("heal.fingerprint.severity", slo["fingerprint"]["severity"])
+
+        # A statistical anomaly that is NOT also a fixed-floor breach is real but
+        # lower-confidence: propose it (autonomy capped at 'suggest'), never
+        # auto-apply. A hard-floor breach keeps the configured autonomy.
+        episode_policy = policy
+        if slo.get("anomaly_only"):
+            episode_policy = heal_policy.Policy(autonomy="suggest")
+            root.set_attribute("heal.anomaly_only", True)
+            print("  (statistical anomaly, not a fixed-floor breach -> autonomy capped at 'suggest')")
         t_breach = time.time()
 
         healed = False
@@ -250,50 +304,96 @@ def main():
             attempt += 1
             snap = controls.snapshot()   # the point this action can be rolled back to
 
-            # ---- DIAGNOSE + DECIDE (the agentic step, via MCP) -----------
-            print(f"\n[DIAGNOSE] attempt {attempt}: local {config.MODEL} reads the incident "
-                  f"via MCP and decides on a fix...")
+            # ---- RECALL or DIAGNOSE + DECIDE -----------------------------
             decisions, gate_log = [], []
             schemas, registry = heal_actuators.build(
                 mcp, controls, pre, decisions, actions=tuple(actions_left),
-                policy=policy, gate_log=gate_log)
-            healer = Agent(tool_schemas=schemas, registry=registry,
-                           system_prompt=scenario.system, root_span="heal.decide",
-                           temperature=0.0)
-            try:
-                healer.invoke(scenario.task.format(cohort=pre))
-            except Exception as e:  # noqa: BLE001
-                print("  decide step raised:", e)
+                policy=episode_policy, gate_log=gate_log)
 
-            for d in gate_log:
-                heal_metrics.policy("allowed" if d.allow else
-                                    ("held" if d.requires_approval else "denied"), d.action)
+            # First, try to RECALL a verified fix for this exact incident class.
+            # A hit replays the known-good action deterministically -- no LLM call.
+            # (Skipped for statistical-only anomalies, which stay human-in-the-loop.)
+            mem = None
+            if attempt == 1 and fp_obj is not None and not slo.get("anomaly_only"):
+                mem = heal_memory.recall(fp_obj, allowed=actions_left)
 
-            chosen = next((d for d in decisions if d != "read_incident"), None)
-            if not chosen:
-                held = [d for d in gate_log if not d.allow and d.requires_approval]
-                if held:
-                    escalated = "awaiting_approval"
-                    root.set_attribute("heal.escalated", escalated)
-                    print(f"  [POLICY] remediation held for human approval "
-                          f"({held[-1].action}: {held[-1].reason}); escalating.")
-                    break
-                # Safety net: the model read the incident but didn't act. Apply the
-                # scenario's default fix ourselves -- still through the policy gate.
-                chosen = scenario.fallback
-                with tracer.start_as_current_span(f"tool.{chosen}", kind=SpanKind.INTERNAL) as fs:
-                    fs.set_attribute("tool.name", chosen)
-                    fs.set_attribute("heal.fallback", True)
-                    res = registry[chosen]()
+            if mem is not None:
+                heal_metrics.recall("hit", fp_obj.class_id)
+                decider = "memory"
+                action = mem["action_base"]
+                print(f"\n[RECALL] a SigNoz-verified fix for this incident class is on record "
+                      f"(proven {mem.get('count', 0)}x, trace {mem.get('trace_id', '')[:12]}); "
+                      f"replaying '{action}' with NO model call.")
+                with tracer.start_as_current_span("heal.decide", kind=SpanKind.INTERNAL) as rspan:
+                    rspan.set_attribute("heal.decider", "memory")
+                    rspan.set_attribute("heal.recall.hit", True)
+                    rspan.set_attribute("heal.recall.source_trace", mem.get("trace_id", ""))
+                    rspan.set_attribute("heal.recall.proven_severity", mem.get("proven_severity", ""))
+                    rspan.set_attribute("heal.recall.times_proven", mem.get("count", 0))
+                    with tracer.start_as_current_span(f"tool.{action}", kind=SpanKind.INTERNAL) as ts:
+                        ts.set_attribute("tool.name", action)
+                        ts.set_attribute("heal.replayed", True)
+                        res = registry[action]()
                 if not res.get("applied"):
-                    escalated = "awaiting_approval"
-                    root.set_attribute("heal.escalated", escalated)
-                    print(f"  [POLICY] default remediation {chosen} not applied "
-                          f"({res.get('policy')}); escalating.")
-                    break
-                print("  (model did not act; applied safe default remediation)")
-            print(f"[ACT]     remediation applied: {chosen}")
+                    print(f"  recalled fix not applied ({res.get('policy') or res.get('reason')}); "
+                          f"falling back to the model.")
+                    mem = None
+                else:
+                    chosen = action
+
+            if mem is None:
+                heal_metrics.recall("miss", fp_obj.class_id if fp_obj else "unknown")
+                # ---- DIAGNOSE + DECIDE (the agentic step, via MCP) -------
+                print(f"\n[DIAGNOSE] attempt {attempt}: local {config.MODEL} reads the incident "
+                      f"via MCP and decides on a fix...")
+                healer = Agent(tool_schemas=schemas, registry=registry,
+                               system_prompt=scenario.system, root_span="heal.decide",
+                               temperature=0.0)
+                try:
+                    healer.invoke(scenario.task.format(cohort=pre))
+                except Exception as e:  # noqa: BLE001
+                    print("  decide step raised:", e)
+
+                for d in gate_log:
+                    heal_metrics.policy("allowed" if d.allow else
+                                        ("held" if d.requires_approval else "denied"), d.action)
+
+                chosen = next((d for d in decisions if d != "read_incident"), None)
+                decider = "llm"   # the model chose from the evidence (default path)
+                if not chosen:
+                    held = [d for d in gate_log if not d.allow and d.requires_approval]
+                    if held:
+                        escalated = "awaiting_approval"
+                        root.set_attribute("heal.escalated", escalated)
+                        root.set_attribute("heal.decision.source", "human")
+                        heal_metrics.decision("human", held[-1].action)
+                        print(f"  [POLICY] remediation held for human approval "
+                              f"({held[-1].action}: {held[-1].reason}); escalating.")
+                        break
+                    # Safety net: the model read the incident but didn't act. Apply
+                    # the scenario's default fix ourselves -- still policy-gated.
+                    chosen = scenario.fallback
+                    decider = "fallback"
+                    with tracer.start_as_current_span(f"tool.{chosen}", kind=SpanKind.INTERNAL) as fs:
+                        fs.set_attribute("tool.name", chosen)
+                        fs.set_attribute("heal.fallback", True)
+                        res = registry[chosen]()
+                    if not res.get("applied"):
+                        escalated = "awaiting_approval"
+                        root.set_attribute("heal.escalated", escalated)
+                        root.set_attribute("heal.decision.source", "human")
+                        heal_metrics.decision("human", chosen)
+                        print(f"  [POLICY] default remediation {chosen} not applied "
+                              f"({res.get('policy')}); escalating.")
+                        break
+                    print("  (model did not act; applied safe default remediation)")
+
+            chosen = _base_action(chosen)
+            print(f"[ACT]     remediation applied: {chosen}  (source={decider})")
             heal_metrics.action(chosen)
+            heal_metrics.decision(decider, chosen)
+            root.set_attribute("heal.decision.source", decider)
+            root.set_attribute("heal.recall.hit", decider == "memory")
             root.set_attribute(f"heal.action.{attempt}", chosen)
             actions_left = [a for a in actions_left
                             if a != chosen and not chosen.startswith(a)]
@@ -304,12 +404,17 @@ def main():
                   f"re-checking SigNoz...")
             _run_canary(controls, post, "heal.canary.post")
             with tracer.start_as_current_span("heal.verify", kind=SpanKind.INTERNAL) as vs:
-                heal_sensors.wait_for_cohort(mcp, post, min_calls=scenario.min_calls)
-                after = scenario.sensor(mcp, post)
+                after = _settle_read(scenario.sensor, mcp, post, scenario.min_calls)
+                vs.set_attribute("slo.status", after["status"])
                 vs.set_attribute("slo.breached", after["breached"])
                 print("  " + after["headline"])
-            healed = not after["breached"]
-            scenario.record(after, post, "post")
+            # Only a positive PASS counts as healed. BREACH or UNKNOWN (blind) both
+            # mean 'not verified healed' -> roll the change back.
+            healed = after["status"] == heal_sensors.STATUS_PASS
+            if after.get("known"):
+                scenario.record(after, post, "post")
+            elif after["status"] == heal_sensors.STATUS_UNKNOWN:
+                print("  could not verify the fix (sensor blind); treating as NOT healed.")
 
             if not healed:
                 # ---- ROLLBACK: the action didn't clear the breach -> revert it.
@@ -328,6 +433,15 @@ def main():
         heal_metrics.mttr(mttr_ms, slo["slo"])
         root.set_attribute("heal.healed", healed)
         root.set_attribute("heal.mttr_ms", round(mttr_ms))
+
+        # LEARN: a verified heal (SigNoz-confirmed) becomes episodic memory, so
+        # the next occurrence of this incident class can be replayed with no LLM.
+        if healed and chosen and fp_obj is not None and not slo.get("anomaly_only"):
+            rec = heal_memory.record_success(fp_obj, chosen, mttr_ms, trace_id_hex)
+            root.set_attribute("heal.memory.recorded", True)
+            root.set_attribute("heal.memory.times_proven", rec.get("count", 0))
+            print(f"  learned: '{chosen}' recorded as a verified fix for incident class "
+                  f"{fp_obj.class_id} (proven {rec.get('count', 0)}x).")
         root.set_status(Status(StatusCode.OK))
 
         if escalated:
@@ -335,7 +449,12 @@ def main():
         else:
             _banner("HEALED" if healed else "NOT HEALED -- escalate")
         pre_str = scenario.value_of(slo)[1]
-        post_str = scenario.value_of(after)[1] if after is not None else "(no remediation applied)"
+        if after is not None and after.get("known"):
+            post_str = scenario.value_of(after)[1]
+        elif after is not None:
+            post_str = "(unverified -- sensor blind)"
+        else:
+            post_str = "(no remediation applied)"
         print(f"  {label}:  {pre_str}  ->  {post_str}")
         print(f"  remediation: {chosen if chosen else '(none -- held for approval)'}")
         print(f"  policy:      {policy.summary()}")
