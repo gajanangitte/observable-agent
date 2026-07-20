@@ -36,6 +36,7 @@ os.environ.setdefault("AGENT_MAX_OUTPUT_TOKENS", "300")   # room for decision + 
 os.environ.setdefault("CANARY_QUESTIONS", "2")            # 2 rollout requests / cohort
 
 import argparse
+import logging
 import subprocess
 import sys
 import time
@@ -59,6 +60,22 @@ from agent import Agent
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIGNOZ_UI = os.getenv("SIGNOZ_UI", "http://localhost:8080")
 tracer = trace.get_tracer("self-healer")
+log = logging.getLogger("self-healer")
+
+
+def _hlog(event, level=logging.INFO, **attrs):
+    """Emit a structured, trace-correlated log record for a heal lifecycle event.
+    telemetry.setup_telemetry() attaches an OTLP handler to the root logger, so
+    these ship to SigNoz stamped with the active trace_id/span_id -- the LOGS
+    signal for the same incident whose TRACES and METRICS we already emit, all
+    pivotable together. Values are kept to primitives so they map cleanly to log
+    attributes."""
+    fields = " ".join(f"{k}={v}" for k, v in attrs.items())
+    extra = {"heal.event": event}
+    for k, v in attrs.items():
+        key = k if k.startswith("heal.") else "heal." + k
+        extra[key] = v if isinstance(v, (str, bool, int, float)) else str(v)
+    log.log(level, "heal.%s %s", event, fields, extra=extra)
 
 HEAL_SYSTEM = (
     "You are a self-healing SRE agent. You work in two steps. "
@@ -286,6 +303,10 @@ def main():
         if slo.get("fingerprint"):
             root.set_attribute("heal.fingerprint.class", slo["fingerprint"]["class_id"])
             root.set_attribute("heal.fingerprint.severity", slo["fingerprint"]["severity"])
+        _hlog("breach.detected", slo=slo["slo"], cohort=pre, value=pre_str,
+              severity=(slo.get("fingerprint") or {}).get("severity", "n/a"),
+              fingerprint=(slo.get("fingerprint") or {}).get("class_id", "n/a"),
+              anomaly_only=bool(slo.get("anomaly_only")))
 
         # A statistical anomaly that is NOT also a fixed-floor breach is real but
         # lower-confidence: propose it (autonomy capped at 'suggest'), never
@@ -340,6 +361,9 @@ def main():
                     mem = None
                 else:
                     chosen = action
+                    _hlog("decision.recall", action=action, source="memory",
+                          times_proven=mem.get("count", 0),
+                          source_trace=str(mem.get("trace_id", ""))[:16])
 
             if mem is None:
                 heal_metrics.recall("miss", fp_obj.class_id if fp_obj else "unknown")
@@ -377,6 +401,8 @@ def main():
                         heal_metrics.decision("human", held[-1].action)
                         print(f"  [POLICY] remediation held for human approval "
                               f"({held[-1].action}: {held[-1].reason}); escalating.")
+                        _hlog("escalated", level=logging.WARNING, reason="policy_hold",
+                              action=held[-1].action, detail=held[-1].reason)
                         break
                     # Safety net: the model read the incident but didn't act. Apply
                     # the scenario's default fix ourselves -- still policy-gated.
@@ -393,11 +419,15 @@ def main():
                         heal_metrics.decision("human", chosen)
                         print(f"  [POLICY] default remediation {chosen} not applied "
                               f"({res.get('policy')}); escalating.")
+                        _hlog("escalated", level=logging.WARNING, reason="default_blocked",
+                              action=chosen, detail=str(res.get("policy")))
                         break
                     print("  (model did not act; applied safe default remediation)")
 
             chosen = _base_action(chosen)
             print(f"[ACT]     remediation applied: {chosen}  (source={decider})")
+            _hlog("action.applied", action=chosen, source=decider, attempt=attempt,
+                  tier=locals().get("eff_tier", "n/a"))
             heal_metrics.action(chosen)
             heal_metrics.decision(decider, chosen)
             root.set_attribute("heal.decision.source", decider)
@@ -416,6 +446,8 @@ def main():
                 vs.set_attribute("slo.status", after["status"])
                 vs.set_attribute("slo.breached", after["breached"])
                 print("  " + after["headline"])
+            _hlog("verify", slo=slo["slo"], cohort=post, status=after["status"],
+                  breached=bool(after["breached"]), healed=after["status"] == heal_sensors.STATUS_PASS)
             # Only a positive PASS counts as healed. BREACH or UNKNOWN (blind) both
             # mean 'not verified healed' -> roll the change back.
             healed = after["status"] == heal_sensors.STATUS_PASS
@@ -432,6 +464,8 @@ def main():
                     controls.restore(snap)
                     print(f"  [ROLLBACK] '{chosen}' did not clear the breach; reverted the "
                           f"control-plane change to its pre-action snapshot.")
+                _hlog("rollback", level=logging.WARNING, action=chosen, attempt=attempt,
+                      status=after["status"])
                 heal_metrics.rollback(chosen)
                 root.set_attribute(f"heal.rollback.{attempt}", chosen)
 
@@ -441,6 +475,10 @@ def main():
         heal_metrics.mttr(mttr_ms, slo["slo"])
         root.set_attribute("heal.healed", healed)
         root.set_attribute("heal.mttr_ms", round(mttr_ms))
+        _hlog("outcome", level=(logging.INFO if healed else logging.WARNING),
+              slo=slo["slo"], healed=healed, escalated=bool(escalated),
+              action=chosen or "none", decider=decider or "none",
+              mttr_s=round(mttr_ms / 1000, 1))
 
         # LEARN: a verified heal (SigNoz-confirmed) becomes episodic memory, so
         # the next occurrence of this incident class can be replayed with no LLM.
