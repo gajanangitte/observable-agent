@@ -1,0 +1,122 @@
+# =============================================================================
+# economics.yaml  --  the one file you edit to make the money model yours.
+#
+# The self-healing agent reasons about real dollars: what a token costs, what a
+# minute of downtime costs, and how much a heal saves. All of those numbers live
+# HERE (and in the built-in defaults in economics.py), so a company can plug in
+# its OWN contract prices, cost-of-downtime figures, SLOs and budgets without
+# touching a line of code. Plug and play.
+#
+# Resolution order (lowest to highest precedence):
+#   1. built-in defaults in economics.py  (offline-safe; a fresh clone just works)
+#   2. this file                          (path via ECONOMICS_CONFIG env)
+#   3. individual environment variables   (quick per-run overrides)
+#
+# Every figure below is a real, public list price or benchmark with a source and
+# the date it was retrieved. Prices change; treat them as a starting point and
+# override with your own.
+# =============================================================================
+
+# --- LLM token prices (USD per 1,000,000 tokens) -----------------------------
+# `models` is an ordered list. The first entry whose `match` is a substring of
+# the model id wins, so put the MORE SPECIFIC id first (gpt-4o-mini before
+# gpt-4o). `default` is used when nothing matches.
+pricing:
+  default:
+    input: 0.10
+    output: 0.10
+  models:
+    # Local models via Ollama are free to run. These are illustrative prices so
+    # the same cost dashboards light up on a laptop as they would in production.
+    - match: "llama3.2"
+      input: 0.10
+      output: 0.10
+      provider: "local/ollama"
+      source: "illustrative (local inference is free); retrieved 2026-07-21"
+    - match: "llama3.1"
+      input: 0.10
+      output: 0.10
+      provider: "local/ollama"
+      source: "illustrative (local inference is free); retrieved 2026-07-21"
+    - match: "qwen2.5"
+      input: 0.10
+      output: 0.10
+      provider: "local/ollama"
+      source: "illustrative (local inference is free); retrieved 2026-07-21"
+    # Hosted list prices. Swap in your negotiated rates.
+    - match: "gpt-4o-mini"
+      input: 0.15
+      output: 0.60
+      provider: "openai"
+      source: "openai.com/api/pricing; retrieved 2026-07-21"
+    - match: "gpt-4o"
+      input: 2.50
+      output: 10.00
+      provider: "openai"
+      source: "openai.com/api/pricing; retrieved 2026-07-21"
+    - match: "claude-3-5-sonnet"
+      input: 3.00
+      output: 15.00
+      provider: "anthropic"
+      source: "anthropic.com/pricing; retrieved 2026-07-21"
+    - match: "claude-3-5-haiku"
+      input: 0.80
+      output: 4.00
+      provider: "anthropic"
+      source: "anthropic.com/pricing; retrieved 2026-07-21"
+    - match: "gemini-1.5-pro"
+      input: 1.25
+      output: 5.00
+      provider: "google"
+      source: "ai.google.dev/pricing (<=128K context tier); retrieved 2026-07-21"
+    - match: "gemini-1.5-flash"
+      input: 0.075
+      output: 0.30
+      provider: "google"
+      source: "ai.google.dev/pricing (<=128K context tier); retrieved 2026-07-21"
+
+# --- Cost of downtime (USD per minute) ---------------------------------------
+# What one minute of a broken workload costs YOUR business. These are named
+# profiles so you can model a startup, an enterprise, or a regulated shop, and
+# switch between them with `active_profile` (or the ECON_ACTIVE_DOWNTIME_PROFILE
+# env var). Replace `custom` with your finance team's real number.
+downtime:
+  active_profile: "gartner_baseline"
+  profiles:
+    gartner_baseline:
+      usd_per_minute: 5600
+      label: "Gartner baseline (about 336K USD per hour)"
+      source: "Gartner, widely cited 5,600 USD/min; retrieved 2026-07-21"
+    itic_enterprise_2024:
+      usd_per_minute: 5000
+      label: "ITIC 2024 enterprise (about 300K USD per hour)"
+      source: "ITIC 2024 survey: 90 percent of enterprises exceed 300K USD/hr; retrieved 2026-07-21"
+    itic_regulated_2024:
+      usd_per_minute: 16667
+      label: "ITIC 2024 regulated (about 1M USD per hour)"
+      source: "ITIC 2024 survey: 41 percent report 1M to 5M USD/hr (low end); retrieved 2026-07-21"
+    custom:
+      usd_per_minute: 0
+      label: "plug in your own cost of downtime"
+      source: "set this to your finance team's number"
+
+# --- Where the money model is applied ----------------------------------------
+# billing_model: which hosted price to use when projecting "what this workload
+#   would cost on a paid API" (used for reports, not for routing).
+# requests_per_day: the production volume used to turn a per-request saving into
+#   a monthly bill. Set it to your real traffic.
+billing_model: "gpt-4o-mini"
+requests_per_day: 100000
+
+# --- Cost SLO + budget (what "too expensive" means) --------------------------
+# slo.cost_max_calls_per_request: over this many llm.chat calls per request is a
+#   runaway-spend breach (the healer's bill-shock sensor).
+# slo.nominal_call_cost_usd: fallback per-call cost when SigNoz cannot sum the
+#   real per-call spend attribute, used only for the headline.
+# budget.per_request_usd: the hard per-request spend budget the cost circuit
+#   breaker arms (the kill-switch that structurally severs a runaway agent).
+slo:
+  cost_max_calls_per_request: 6
+  nominal_call_cost_usd: 0.00004
+budget:
+  per_request_usd: 0.0001

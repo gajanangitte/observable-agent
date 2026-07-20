@@ -90,29 +90,16 @@ ENVIRONMENT = os.getenv("DEPLOY_ENV", "dev")
 OTLP_TIMEOUT_S = int(os.getenv("OTLP_TIMEOUT_S", "5"))
 FLUSH_TIMEOUT_MS = int(os.getenv("OTLP_FLUSH_TIMEOUT_MS", "4000"))
 
-# --- Illustrative pricing (USD per 1,000,000 tokens) --------------------------
-# The local Ollama model is FREE. These prices let us demonstrate cost
-# observability as if the same tokens ran on a hosted model. Swap in your
-# provider's real numbers to track actual spend.
-PRICING = {
-    "llama3.2": (0.10, 0.10),
-    "llama3.1": (0.10, 0.10),
-    "qwen2.5": (0.10, 0.10),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.00),
-    "claude-3-5-sonnet": (3.00, 15.00),
-    "default": (0.10, 0.10),
-}
+# --- Pricing + economics (plug and play) --------------------------------------
+# All money numbers (token prices, cost of downtime, cost SLO, spend budget) live
+# in the economics module and its economics.yaml, so a company plugs in its OWN
+# figures without touching code. We re-export the token-price surface here so the
+# historical config.PRICING / config.price_for / config.cost_usd API is unchanged.
+# The local Ollama model is FREE; the illustrative prices let the same cost
+# dashboards light up on a laptop as they would against a hosted model. Swap in
+# your provider's real numbers in economics.yaml to track actual spend.
+import economics
 
-
-def price_for(model: str):
-    m = (model or "").lower()
-    for key, val in PRICING.items():
-        if key != "default" and key in m:
-            return val
-    return PRICING["default"]
-
-
-def cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
-    p_in, p_out = price_for(model)
-    return (input_tokens / 1_000_000) * p_in + (output_tokens / 1_000_000) * p_out
+PRICING = economics.PRICING
+price_for = economics.price_for
+cost_usd = economics.cost_usd

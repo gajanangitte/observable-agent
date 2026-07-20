@@ -19,8 +19,14 @@ from opentelemetry import trace
 
 import heal_policy
 import heal_sensors
+import economics
 
-HEAL_COST_BUDGET_USD = float(os.getenv("HEAL_COST_BUDGET_USD", "0.0001") or 0.0001)
+# The per-request spend budget the cost circuit breaker arms. Default comes from
+# the economics model (economics.yaml budget.per_request_usd, default 0.0001) so
+# it is configurable centrally; HEAL_COST_BUDGET_USD still overrides per run.
+HEAL_COST_BUDGET_USD = float(
+    os.getenv("HEAL_COST_BUDGET_USD", str(economics.default_budget_usd()))
+    or economics.default_budget_usd())
 
 
 def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", "enable_mitigation"),

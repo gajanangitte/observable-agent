@@ -15,12 +15,17 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 import heal_baseline
 import heal_fingerprint
 import heal_stats
+import economics
 
 TARGET_SERVICE = "observable-agent"   # the managed workload the healer watches
 RETRY_SLO_MAX_RATE = 0.05             # > 5% dropped-and-retried llm.chat = breach
 LATENCY_SLO_MAX_MS = 60000            # agent.invoke p95 must stay under 60s
-COST_SLO_MAX_CALLS_PER_REQ = 6        # > 6 llm.chat per request = runaway-spend breach
-NOMINAL_CALL_COST_USD = 0.00004       # fallback per-call cost for the spend headline
+# Cost SLO + nominal per-call cost are sourced from the economics model (defaults
+# 6 and 0.00004), so a company retunes "too expensive" in economics.yaml without
+# editing this file. The count stays an int for a clean headline when it is whole.
+_cpr = economics.cost_slo_max_calls_per_request()
+COST_SLO_MAX_CALLS_PER_REQ = int(_cpr) if float(_cpr).is_integer() else _cpr
+NOMINAL_CALL_COST_USD = economics.nominal_call_cost_usd()   # fallback per-call spend
 
 # Every sensor reads one of three states. The critical safety property is that a
 # blind sensor reports UNKNOWN -- it NEVER silently reports 0 / healthy when it

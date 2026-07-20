@@ -5,8 +5,10 @@
 Each test module is plain asserts (also pytest-compatible). Together they cover the
 deterministic core -- fingerprinting, robust stats, the three-state sensor logic,
 the policy + parameter gate, and verified memory -- plus the reliability surfaces
-around it: tiered model routing and cost math (test_config), the SLO-aligned alert
-specs and their single-source-of-truth thresholds (test_alert), the SigNoz->heal
+around it: tiered model routing and cost math (test_config), the plug-and-play
+economics model with real pricing and cost-of-downtime data (test_economics), the
+SLO-aligned alert specs and their single-source-of-truth thresholds (test_alert),
+the SigNoz->heal
 bridge's alert routing / cooldown keying / incident span-link reader (test_bridge),
 and the telemetry plumbing itself -- the incident span-link handoff and the
 trace-correlated structured heal logs, checked with in-memory OTel exporters
@@ -27,6 +29,7 @@ MODULES = [
     "tests.test_actuators",
     "tests.test_memory",
     "tests.test_config",
+    "tests.test_economics",
     "tests.test_alert",
     "tests.test_bridge",
     "tests.test_telemetry",

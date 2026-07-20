@@ -46,6 +46,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 import config
+import economics
 import telemetry
 import heal_metrics
 import heal_sensors
@@ -507,6 +508,23 @@ def main():
         print(f"  MTTR:        {mttr_ms / 1000:.0f}s   (breach detected -> verified)")
         print(f"  trace:       agent.heal   {trace_id_hex}")
         print(f"  view:        {SIGNOZ_UI}/trace/{trace_id_hex}")
+
+        # ---- IMPACT: translate the heal into real money -------------------
+        # Benchmarks (LLM list prices + cost of downtime) that a company plugs
+        # in via economics.yaml. Estimates, clearly labeled, not an invoice.
+        impact = economics.impact_report(
+            spend_before=slo.get("spend_per_request_usd"),
+            spend_after=(after.get("spend_per_request_usd") if after else None),
+            mttr_s=mttr_ms / 1000)
+        if impact["lines"]:
+            print("  " + "-" * 64)
+            print("  [IMPACT]  real-money view (benchmarks, tune in economics.yaml):")
+            for ln in impact["lines"]:
+                print(f"            {ln}")
+            root.set_attribute("heal.impact.downtime_profile", impact["downtime_profile"])
+            if "monthly_spend_saved_usd" in impact:
+                root.set_attribute("heal.impact.monthly_spend_saved_usd",
+                                   round(impact["monthly_spend_saved_usd"], 2))
 
     telemetry.shutdown()
     print("\nflushed self-healer traces + metrics to SigNoz.")

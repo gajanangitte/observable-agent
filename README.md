@@ -181,6 +181,30 @@ python blog/signoz_login.py      # saves blog/state.json + blog/token.txt
 python blog/make_dashboard.py    # creates the dashboard, prints its UUID
 ```
 
+## Cost and economics model (plug and play)
+
+The agent reasons about real dollars: what a token costs, what a minute of
+downtime costs your business, and how much a heal saves. Every one of those
+numbers lives in [`economics.yaml`](economics.yaml), so you plug in YOUR figures
+without touching code. Resolution is layered, lowest to highest precedence:
+
+1. built-in defaults in `economics.py` (real, sourced, dated public figures), so a
+   fresh clone and an offline box just work,
+2. `economics.yaml` (the single file you edit), and
+3. a few `ECON_*` environment variables for quick per run overrides.
+
+It ships with real, cited data you can trust or replace: hosted LLM list prices
+(OpenAI, Anthropic, Google, per 1,000,000 tokens) and named cost of downtime
+profiles (a Gartner baseline of about 336K USD per hour, plus ITIC 2024
+enterprise and regulated profiles). To model your own shop, edit the file or set
+`ECON_ACTIVE_DOWNTIME_PROFILE=custom` with your finance team's number.
+
+Every `self_heal.py` run closes with an `[IMPACT]` line that turns the heal into
+money at those benchmarks, for example the monthly LLM spend a cost breaker saves
+at your request volume, and the cost of the outage class the agent cleared
+unattended. The whole surface is covered by `tests/test_economics.py` (network
+free).
+
 ## Repo layout
 
 | File | Purpose |
@@ -188,7 +212,9 @@ python blog/make_dashboard.py    # creates the dashboard, prints its UUID
 | `agent.py` | Agent loop + span creation (`agent.invoke`, `llm.chat`, `tool.*`) |
 | `telemetry.py` | OpenTelemetry wiring → SigNoz OTLP; metric instruments; `record_*` helpers |
 | `tools.py` | Four mock SRE tools + OpenAI tool schemas |
-| `config.py` | Env overridable config + illustrative per model cost table |
+| `config.py` | Env overridable config; re-exports the pricing surface from `economics.py` |
+| `economics.py` | **Plug and play money model**: token prices, cost of downtime, cost SLO, spend budget, and the `[IMPACT]` report; layered defaults → `economics.yaml` → env |
+| `economics.yaml` | The one file you edit to plug in your own numbers (real, cited pricing + downtime profiles) |
 | `run_load.py` | Traffic generator (varied SRE questions, incl. an error path) |
 | `self_heal.py` | **Competition project**: governed closed loop orchestrator (`agent.heal` trace); `--scenario {retry,cost}` |
 | `heal_bridge.py` | Turns a **SigNoz alert** into a governed heal (poll + webhook), in the alert's own trace, then watches SigNoz mark it resolved |
@@ -202,5 +228,5 @@ python blog/make_dashboard.py    # creates the dashboard, prints its UUID
 
 ## Notes on honesty
 
-- **Cost is illustrative.** Local Ollama is free; `config.PRICING` applies a per 1M token rate so cost observability can be demonstrated. The instrumentation is identical to what you'd use against a paid API. Point `gen_ai.system` at `openai`/`anthropic` and the same panels track real dollars.
+- **Cost is illustrative by default, real when you want it.** Local Ollama is free; `economics.yaml` applies a per 1M token rate so cost observability can be demonstrated on a laptop. It also ships real, cited hosted prices and cost of downtime benchmarks, so pointing `gen_ai.system` at `openai`/`anthropic` and dropping in your contract rates makes the same panels and the `[IMPACT]` report track real dollars.
 - **CPU inference is slow**, which is a feature here: the latency tail is real, so there's actually something to observe.
