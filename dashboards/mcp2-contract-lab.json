@@ -1,0 +1,842 @@
+{
+  "description": "One Query Builder dashboard certifies an MCP server from all three OpenTelemetry signals: metrics (mcp.cert.contract verdicts, the grade per run, the UNKNOWN blind-spot count, and the mcp.client.calls auto-instrumentation counters), traces (the instrumented mcp.tools/call spans and their p95, plus the mcp.cert.suite run roots), and logs (the structured certification lifecycle line). Set the time range to the last 3 hours.",
+  "layout": [
+    {
+      "h": 4,
+      "i": "4d14b09a-2a56-43da-90d5-dc3670b956ff",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "h": 4,
+      "i": "de1cd69c-e576-4d09-a779-eac164785334",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 4,
+      "y": 0
+    },
+    {
+      "h": 6,
+      "i": "7e64b860-66a9-4c09-bb87-c191e975d1f3",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 8,
+      "y": 0
+    },
+    {
+      "h": 4,
+      "i": "2054b551-77af-4994-88fa-c22bdbaa50a6",
+      "moved": false,
+      "static": false,
+      "w": 3,
+      "x": 0,
+      "y": 4
+    },
+    {
+      "h": 6,
+      "i": "6819b6a5-9b8d-4a04-b3d9-fe5397011fe1",
+      "moved": false,
+      "static": false,
+      "w": 5,
+      "x": 3,
+      "y": 4
+    },
+    {
+      "h": 6,
+      "i": "1ab7a386-e925-46e8-b442-aeca6884871f",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 8,
+      "y": 6
+    },
+    {
+      "h": 4,
+      "i": "ee9188f4-2f37-46d9-9b3d-e8cdb7f7dc23",
+      "moved": false,
+      "static": false,
+      "w": 3,
+      "x": 0,
+      "y": 8
+    },
+    {
+      "h": 7,
+      "i": "bed67864-3d3e-4cbe-91c1-a951c52041eb",
+      "moved": false,
+      "static": false,
+      "w": 6,
+      "x": 0,
+      "y": 12
+    },
+    {
+      "h": 7,
+      "i": "eb384071-67ae-4329-bab2-7667569cb460",
+      "moved": false,
+      "static": false,
+      "w": 6,
+      "x": 6,
+      "y": 12
+    }
+  ],
+  "panelMap": {},
+  "tags": [
+    "mcp",
+    "contract-lab",
+    "reliability",
+    "traces",
+    "metrics",
+    "logs",
+    "query-builder",
+    "track02",
+    "hackathon"
+  ],
+  "title": "MCP Contract Lab: Reliability Certification (traces + metrics + logs)",
+  "uploadedGrafana": false,
+  "variables": {},
+  "version": "v5",
+  "widgets": [
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: each mcp.cert.suite root span is one full certification run.",
+      "fillSpans": false,
+      "id": "4d14b09a-2a56-43da-90d5-dc3670b956ff",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'mcp-contract-lab' AND name = 'mcp.cert.suite'"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": {
+                "expression": ""
+              },
+              "legend": "runs",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "dc8302b5-f813-4ded-8f1d-355fe435397a",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Certification runs",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "METRICS: contracts the lab could NOT evaluate this window. Fail-closed honesty: a check it cannot run is UNKNOWN, never a silent pass.",
+      "fillSpans": false,
+      "id": "de1cd69c-e576-4d09-a779-eac164785334",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "mcp.cert.contract",
+                  "spaceAggregation": "sum",
+                  "temporality": "",
+                  "timeAggregation": "count"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "status = 'UNKNOWN'"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": {
+                "expression": ""
+              },
+              "legend": "blind",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "f5fbca89-2b35-4470-a3dd-317d0335c2c6",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Coverage blind spots (UNKNOWN)",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "METRICS: mcp.cert.contract split by status -- the full verdict mix across runs.",
+      "fillSpans": false,
+      "id": "7e64b860-66a9-4c09-bb87-c191e975d1f3",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "pie",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "mcp.cert.contract",
+                  "spaceAggregation": "sum",
+                  "temporality": "",
+                  "timeAggregation": "count"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": ""
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "status--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "status",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{status}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "3b749622-da5a-4089-8e9f-dda095e55333",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Contract verdicts (PASS / BREACH / UNKNOWN)",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: p95 of the instrumented mcp.tools/call spans. This is what the latency_slo contract certifies against.",
+      "fillSpans": false,
+      "id": "2054b551-77af-4994-88fa-c22bdbaa50a6",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "p95(duration_nano)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'mcp-contract-lab' AND name = 'mcp.tools/call'"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": {
+                "expression": ""
+              },
+              "legend": "p95",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "30d27c54-56cd-47dc-9d18-6a465b528532",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Read-call latency p95",
+      "yAxisUnit": "ns"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "METRICS: mcp.client.calls by tool -- every tools/call the lab drove, auto-captured with zero server changes.",
+      "fillSpans": false,
+      "id": "6819b6a5-9b8d-4a04-b3d9-fe5397011fe1",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "bar",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "mcp.client.calls",
+                  "spaceAggregation": "sum",
+                  "temporality": "",
+                  "timeAggregation": "count"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": ""
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "mcp.tool.name--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "mcp.tool.name",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{mcp.tool.name}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "66dda54d-830b-40b1-9097-513d617c5018",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Instrumented MCP calls by tool",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "METRICS: which reliability contract actually broke (status = BREACH). Each fault flips exactly one cell, so this points straight at the defect.",
+      "fillSpans": false,
+      "id": "1ab7a386-e925-46e8-b442-aeca6884871f",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "pie",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "mcp.cert.contract",
+                  "spaceAggregation": "sum",
+                  "temporality": "",
+                  "timeAggregation": "count"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "status = 'BREACH'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "contract--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "contract",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{contract}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "86ccb60d-e625-43cb-b647-d209f34cd7bc",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Breaches by contract",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "METRICS: mcp.client.calls by status -- ok vs error across the probe traffic.",
+      "fillSpans": false,
+      "id": "ee9188f4-2f37-46d9-9b3d-e8cdb7f7dc23",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "mcp.client.calls",
+                  "spaceAggregation": "sum",
+                  "temporality": "",
+                  "timeAggregation": "count"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": ""
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "status--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "status",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{status}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "d68cc45c-27e4-4435-90e9-2fd6d60ae389",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Calls ok vs error",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "METRICS: mcp.cert.grade by grade -- CERTIFIED / PARTIAL / FAILED / BLIND per run. This is the CI gate turned into a time series.",
+      "fillSpans": false,
+      "id": "bed67864-3d3e-4cbe-91c1-a951c52041eb",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "bar",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "mcp.cert.grade",
+                  "spaceAggregation": "sum",
+                  "temporality": "",
+                  "timeAggregation": "count"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": ""
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "grade--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "grade",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{grade}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "fd1e73aa-3676-4ab8-b617-d2688491f3e9",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Certification grade per run",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "LOGS: the structured certification log, one row per lifecycle step (suite.start, contract.verdict, suite.done), correlated to the run trace.",
+      "fillSpans": false,
+      "id": "eb384071-67ae-4329-bab2-7667569cb460",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "pie",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "logs",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'mcp-contract-lab' AND mcp2.event EXISTS"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "mcp2.event--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "mcp2.event",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{mcp2.event}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "39e3d615-c083-4161-98a8-b82555b23583",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Certification lifecycle events",
+      "yAxisUnit": "none"
+    }
+  ]
+}

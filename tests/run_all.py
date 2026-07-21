@@ -12,7 +12,10 @@ the SigNoz->heal
 bridge's alert routing / cooldown keying / incident span-link reader (test_bridge),
 and the telemetry plumbing itself -- the incident span-link handoff and the
 trace-correlated structured heal logs, checked with in-memory OTel exporters
-(test_telemetry). They need neither SigNoz, Ollama, nor the network.
+(test_telemetry) -- and the MCP Contract Lab's pure certification core: the eight
+three-state reliability contracts, the drift fingerprint / diff, and the grade
+folding, all on hand-built observations (test_mcp2_contracts). They need neither
+SigNoz, Ollama, nor the network.
 """
 import importlib
 import os
@@ -33,6 +36,7 @@ MODULES = [
     "tests.test_alert",
     "tests.test_bridge",
     "tests.test_telemetry",
+    "tests.test_mcp2_contracts",
 ]
 
 

@@ -222,8 +222,13 @@ free).
 | `heal_*.py` | Self healing modules: sensors (MCP SLO detectors: retry tax + cost), actuators (policy gated, incl. the cost kill switch), control plane (+ snapshot/rollback), canary rollout, metrics, dashboard |
 | `mcp_client.py` | Streamable HTTP bridge to the SigNoz MCP server |
 | `dashboard_fullsignal.py` | **Track 02** builder: one dashboard that reads the heal loop from traces + metrics + logs; self verifies every panel, then exports importable JSON |
+| `mcp2_cert.py` | **MCP Contract Lab (Track 02)**: certifies the MCP protocol itself; emits traces + metrics + logs on service `mcp-contract-lab`; exits non-zero on a failed grade (CI gate). `--fault` injects deterministic chaos |
+| `mcp2_contracts.py` / `mcp2_model.py` | The pure, network free certification core: eight three state reliability contracts + drift fingerprint (44 unit tests) |
+| `mcp2_probe.py` / `mcp2_metrics.py` | Auto instrumentation layer: emits `mcp.*` client spans + `mcp.client.*` metrics per call, empirical safe read discovery, in process fault injection |
+| `mcp2_dashboard.py` / `mcp2_alert.py` | The lab's SigNoz dashboard (self verified panels, exported JSON) and its breach + blind spot alerts |
 | `docs/SELF_HEALING.md` | Competition project writeup + hero run screenshots |
 | `docs/TRACK02.md` | Signals and Dashboards writeup: the three signal dashboard, its nine panels, and the Query Builder techniques |
+| `docs/TRACK02_MCP2.md` | **MCP Contract Lab** writeup: observability as tests for the MCP protocol, the eight contracts, the three signals, and the alerts |
 | `blog/` | Blog posts, screenshots, and the SigNoz login/dashboard/capture scripts |
 
 ## Notes on honesty
