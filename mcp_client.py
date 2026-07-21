@@ -9,6 +9,7 @@ dead simple and free of cross-task cancellation hazards.
 """
 import asyncio
 
+import config
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -25,7 +26,10 @@ class SigNozMCP:
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     return await coro_fn(session)
-        return asyncio.run(runner())
+        # Bound every call: the fail-closed sensors only convert EXCEPTIONS into the
+        # UNKNOWN sentinel, so a wedged server that never replies must raise
+        # (TimeoutError) rather than block asyncio.run -- and the heal loop -- forever.
+        return asyncio.run(asyncio.wait_for(runner(), timeout=config.MCP_TIMEOUT_S))
 
     def list_tools(self):
         return self._run(lambda s: s.list_tools()).tools

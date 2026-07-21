@@ -339,7 +339,12 @@ class Energy:
     def verdict(self, total_joules: float, total_grams: float,
                 verified: int) -> Verdict:
         """Fail-closed GreenOps SLO. UNKNOWN below the minimum sample so a tiny
-        cohort never fires a false breach nor a false all-clear."""
+        cohort never fires a false breach nor a false all-clear, and UNKNOWN (never
+        a comforting PASS) when answers verified but no energy was recorded: a
+        zero-joule reading means the accounting failed, not that the work was free.
+        A cohort BREACHES if it is over EITHER the joule budget or the carbon
+        budget per verified answer, so the configurable carbon knob actually bites.
+        """
         b = self.budget
         jpa = self.per_verified(total_joules, verified)
         gpa = (max(0.0, float(total_grams)) / verified) if verified > 0 else None
@@ -348,9 +353,27 @@ class Energy:
                            b.joules_per_verified_answer,
                            reason=f"only {verified} verified answers "
                                   f"(need {b.minimum_verified_answers} to judge)")
-        status = BREACH if jpa is not None and jpa > b.joules_per_verified_answer else PASS
-        reason = (f"{jpa:.0f} J per verified answer vs budget "
-                  f"{b.joules_per_verified_answer:.0f} J") if jpa is not None else "no data"
+        if total_joules <= 0:
+            return Verdict(UNKNOWN, None, gpa, verified, total_joules, total_grams,
+                           b.joules_per_verified_answer,
+                           reason=f"{verified} verified answers but no energy was "
+                                  f"recorded (missing token counts or an accounting "
+                                  f"failure); refusing a zero all-clear")
+        over_j = jpa is not None and jpa > b.joules_per_verified_answer
+        over_c = (gpa is not None and b.gco2_per_verified_answer > 0
+                  and gpa > b.gco2_per_verified_answer)
+        status = BREACH if (over_j or over_c) else PASS
+        if over_j and over_c:
+            reason = (f"{jpa:.0f} J (budget {b.joules_per_verified_answer:.0f} J) and "
+                      f"{gpa:.3f} gCO2e (budget {b.gco2_per_verified_answer:.3f}) per "
+                      f"verified answer")
+        elif over_c:
+            reason = (f"{gpa:.3f} gCO2e per verified answer over the "
+                      f"{b.gco2_per_verified_answer:.3f} budget (energy {jpa:.0f} J "
+                      f"within its {b.joules_per_verified_answer:.0f} J budget)")
+        else:
+            reason = (f"{jpa:.0f} J per verified answer vs budget "
+                      f"{b.joules_per_verified_answer:.0f} J")
         return Verdict(status, jpa, gpa, verified, total_joules, total_grams,
                        b.joules_per_verified_answer, reason=reason)
 

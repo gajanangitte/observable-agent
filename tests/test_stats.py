@@ -68,6 +68,23 @@ def test_assess_cold_start_never_anomaly():
     assert s.assess([0.0, 0.0], 99.0)["anomaly"] is False
 
 
+def test_robust_z_flat_zero_baseline_flags_subfloor_departure():
+    # An all-zero healthy history has zero variance. A sub-floor spike (0.4, still
+    # under a 5 percent fixed floor) used to read as a blind 0.0 ("not anomalous").
+    # It must now be a clear outlier so the supplement earns its keep.
+    assert s.robust_z([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.4) > s.DEFAULT_Z_THRESHOLD
+    # A value equal to the flat baseline is still perfectly normal.
+    assert s.robust_z([0.0] * 6, 0.0) == 0.0
+
+
+def test_assess_subfloor_regression_on_flat_baseline_is_anomaly():
+    # The marketed promise: catch a regression that stays under the fixed floor even
+    # when the healthy baseline is dead flat (the common all-zero retry history).
+    v = s.assess([0.0, 0.0, 0.0, 0.0, 0.0], 0.35)
+    assert v["anomaly"] is True
+    assert v["z_outlier"] is True
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

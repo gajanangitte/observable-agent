@@ -299,6 +299,33 @@ def test_impact_report_unknown_verdict_is_honest():
     assert any("UNKNOWN" in ln for ln in r["lines"])
 
 
+def test_verdict_zero_energy_is_unknown_not_a_comforting_pass():
+    _reset()
+    # Enough verified answers, but the energy accounting produced nothing (e.g. an
+    # OpenAI-compatible endpoint returned no token usage, so every call modelled to
+    # 0 J). A zero-joule reading is an accounting failure, not free work, so the
+    # verdict must be UNKNOWN, never the green "comforting zero" the track forbids.
+    v = energy.verdict(0.0, 0.0, 5)
+    assert v.status == energy.UNKNOWN
+    assert v.joules_per_verified_answer is None
+    assert "no energy" in v.reason
+
+
+def test_verdict_breaches_on_carbon_even_when_joules_pass():
+    _reset()
+    # Joules per answer are within the 900 J budget, but carbon per answer is over
+    # the 0.11 gCO2e budget: the configurable carbon knob must actually bite.
+    # 3200 J over 4 answers = 800 J/answer (< 900). 0.60 g over 4 = 0.15 g (> 0.11).
+    v = energy.verdict(3200.0, 0.60, 4)
+    assert v.joules_per_verified_answer == 800.0
+    assert v.gco2_per_verified_answer == 0.15
+    assert v.status == energy.BREACH
+    assert "gCO2e" in v.reason
+    # A run under both budgets still passes.
+    ok = energy.verdict(3200.0, 0.30, 4)
+    assert ok.status == energy.PASS
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

@@ -64,6 +64,16 @@ def test_validate_params_unbounded_action_passthrough():
     assert clean == {"anything": 1}
 
 
+def test_invalid_autonomy_fails_closed_to_observe():
+    # A typo or unknown value must drop to the safest mode, never silently grant the
+    # most permissive one. Fail closed: an unreadable setting cannot escalate power.
+    p = hp.Policy(autonomy="AUTOMATIC-TYPO")
+    assert p.autonomy == "observe"
+    assert p.evaluate("disable_fault_injection").allow is False
+    # A valid explicit level is still honoured verbatim.
+    assert hp.Policy(autonomy="auto").autonomy == "auto"
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

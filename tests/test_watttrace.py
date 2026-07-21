@@ -116,6 +116,28 @@ def test_on_llm_never_raises_and_record_answer_is_safe():
     watt_metrics.record_answer("m", False)
 
 
+def test_verify_rejects_negation_and_echo():
+    # A fluent WRONG answer that still contains both required keywords must not
+    # verify: the negation "not healthy" is exactly the trap a keyword-only check
+    # would fall into.
+    assert not watt_report.verify("payments is not healthy", ["payment", "healthy"],
+                                  ["not healthy", "unhealthy"])
+    # A bare echo of a multiple-choice question must not verify by luck.
+    assert not watt_report.verify("payments or checkout", ["payment"], ["or checkout"])
+    # The genuine right answer still verifies with the same guards in place.
+    assert watt_report.verify("payments is healthy", ["payment", "healthy"],
+                              ["not healthy", "unhealthy"])
+    # must_not is optional, so the old two-argument call still works.
+    assert watt_report.verify("payments are healthy", ["payment", "healthy"])
+
+
+def test_golden_set_ships_contradiction_guards():
+    # Defence in depth: every golden item carries a must_not so the deterministic
+    # grader cannot be fooled by a fluent contradiction of the known-good fact.
+    for item in watt_report.GOLDEN:
+        assert item.get("must_not"), item["q"]
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

@@ -123,7 +123,13 @@ class Agent:
                 # (status="dropped") -- that is the wasted work of the retry.
                 if attempt < max_attempts and getattr(self._chaos, "armed", False):
                     self._chaos.armed = False
-                    telemetry.record_llm(self._model, in_tok, out_tok, latency_ms, "dropped")
+                    # The dropped attempt really burned these tokens, so charge its
+                    # cost and call to the per-request budget too: a retry storm must
+                    # count against the hard cost breaker, not slip through unbilled.
+                    wasted_cost = telemetry.record_llm(self._model, in_tok, out_tok,
+                                                       latency_ms, "dropped")
+                    self._req.cost = getattr(self._req, "cost", 0.0) + wasted_cost
+                    self._req.calls = getattr(self._req, "calls", 0) + 1
                     telemetry.record_retry(self._model, "response_dropped")
                     backoff_ms = config.RETRY_BACKOFF_MS * attempt
                     span.set_attribute("fault.injected", True)

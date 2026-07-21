@@ -26,6 +26,11 @@ import math
 # the conventional Iglewicz-Hoaglin cut-off for the median/MAD z-score.
 DEFAULT_Z_THRESHOLD = 3.5
 
+# Sigma stamped when a value departs from a perfectly flat (zero-variance)
+# baseline. The scale is genuinely undefined there, so any real departure is
+# treated as a maximal-confidence outlier rather than a blind, silent 0.0.
+_DEGENERATE_SIGMA = 1e6
+
 
 def median(xs):
     s = sorted(xs)
@@ -59,8 +64,13 @@ def robust_z(baseline, x):
     """Modified z-score of ``x`` against a ``baseline`` series.
 
     Uses median/MAD (0.6745 = the normal-consistency constant). When the MAD is
-    degenerate (a perfectly flat baseline) it falls back to mean/stddev so the
-    score is still defined. Returns 0.0 when the baseline is too small to judge.
+    degenerate it falls back to mean/stddev. When the baseline is perfectly flat
+    (zero variance, e.g. the very common all-zero healthy retry history) the scale
+    is undefined, so a value equal to the constant is normal but any real departure
+    is a maximal-confidence outlier: a series that has been dead flat and then moves
+    is, by definition, out of character. That is exactly what catches a sub-floor
+    regression the fixed floor would miss. Returns 0.0 when the baseline is too
+    small to judge.
     """
     if len(baseline) < 3:
         return 0.0
@@ -69,9 +79,13 @@ def robust_z(baseline, x):
     if d > 0:
         return 0.6745 * (x - m) / d
     mean, sd = _mean_std(baseline)
-    if sd == 0:
+    if sd > 0:
+        return (x - mean) / sd
+    # Perfectly flat baseline: zero scale. Equal value is normal; a real departure
+    # is a maximal outlier instead of the old blind 0.0 that saw nothing.
+    if abs(x - mean) <= 1e-9 + 1e-6 * abs(mean):
         return 0.0
-    return (x - mean) / sd
+    return math.copysign(_DEGENERATE_SIGMA, x - mean)
 
 
 def ewma(xs, alpha=0.3):

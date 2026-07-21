@@ -57,23 +57,37 @@ HERE = Path(__file__).resolve().parent
 # nondeterminism would contaminate the score).
 GOLDEN = [
     {"q": "What is the current status of the payments service? Answer in one sentence.",
-     "must": ["payment", "healthy"]},
+     "must": ["payment", "healthy"],
+     "must_not": ["not healthy", "unhealthy", "degraded", "down", "unavailable"]},
     {"q": "Is the search service healthy right now? Answer in one sentence.",
-     "must": ["search", "healthy"]},
+     "must": ["search", "healthy"],
+     "must_not": ["not healthy", "unhealthy", "degraded", "down", "unavailable"]},
     {"q": "What is the status of the checkout service? Answer in one sentence.",
-     "must": ["checkout", "degraded"]},
+     "must": ["checkout", "degraded"],
+     "must_not": ["not degraded", "is healthy", "stable"]},
     {"q": "What is the status of the inventory service? Answer in one sentence.",
-     "must": ["inventory", "degraded"]},
+     "must": ["inventory", "degraded"],
+     "must_not": ["not degraded", "is healthy", "stable"]},
     {"q": "Which service is healthy: payments or checkout? Answer with the service name.",
-     "must": ["payment"]},
+     "must": ["payment"],
+     "must_not": ["or checkout", "checkout is healthy", "both", "neither", "not sure"]},
 ]
 
 
-def verify(answer: str, must) -> bool:
+def verify(answer: str, must, must_not=None) -> bool:
     """Fail-closed: an answer counts as verified only if it states every required
-    fact. Missing or empty answers are not verified (never healthy by default)."""
+    fact (``must``) and none of the contradicting ones (``must_not``). Missing or
+    empty answers are not verified (never healthy by default). ``must_not`` is the
+    defence against a fluent WRONG answer that still contains the right keywords,
+    e.g. a negation ("payments is not healthy") or a bare echo of the question."""
     a = (answer or "").lower()
-    return bool(a) and all(k.lower() in a for k in must)
+    if not a:
+        return False
+    if not all(k.lower() in a for k in must):
+        return False
+    if must_not and any(k.lower() in a for k in must_not):
+        return False
+    return True
 
 
 def run_cohort(agent, tracer, name, chaos, questions):
@@ -96,7 +110,7 @@ def run_cohort(agent, tracer, name, chaos, questions):
                 except Exception as e:  # a crashed answer is simply not verified
                     answer = ""
                     ans_span.set_status(Status(StatusCode.ERROR, str(e)))
-                ok = verify(answer, item["must"])
+                ok = verify(answer, item["must"], item.get("must_not"))
                 verified += 1 if ok else 0
                 ans_span.set_attribute("watttrace.answer.verified", ok)
                 watt_metrics.record_answer(agent._model, ok)
@@ -238,10 +252,15 @@ def run(cohorts, questions, gate, export, json_out):
             print(f"  watt suite trace: {trace_hex}")
             print(f"  view:             {ui}/trace/{trace_hex}")
 
-    worst = report and next((r["verdict"].status for r in rows
-                             if r["verdict"].status == energy.BREACH), None)
-    if gate and worst == energy.BREACH:
-        return 1
+    statuses = [r["verdict"].status for r in rows]
+    if gate:
+        if energy.BREACH in statuses:
+            print("  GATE: a cohort BREACHED the GreenOps budget -> failing the build")
+            return 1
+        if energy.UNKNOWN in statuses:
+            print("  GATE: a cohort is UNKNOWN (too few verified answers or no energy "
+                  "recorded) -> failing closed, not green-lighting an unjudgeable run")
+            return 2
     return 0
 
 

@@ -115,9 +115,13 @@ def pick_read_tools(tools: List[ToolInfo], k: int = DEFAULT_READ_K) -> List[str]
 
 
 def pick_required_tool(tools: List[ToolInfo]) -> Optional[str]:
-    """A tool that declares required arguments, for the missing-args probe."""
+    """A NON-mutating tool that declares required arguments, for the missing-args
+    probe. A certification run must never risk a real side effect on the server it
+    is certifying, so a ``delete_*`` / ``set_*`` / ``write_*`` tool is never chosen;
+    if every required-arg tool looks mutating we return None and the caller simply
+    skips the misuse probe (an honest gap, never a mutation)."""
     for t in tools:
-        if _required(t.input_schema):
+        if _required(t.input_schema) and not _looks_mutating(t.name):
             return t.name
     return None
 

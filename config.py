@@ -80,6 +80,11 @@ CHAOS_RUNAWAY_CALLS = int(os.getenv("CHAOS_RUNAWAY_CALLS", "12"))
 # The agent can read its OWN telemetry back out of SigNoz through the official
 # SigNoz MCP server. Point this at the server's streamable-HTTP endpoint.
 MCP_URL = os.getenv("SIGNOZ_MCP_URL", "http://localhost:8000/mcp")
+# Hard per-call ceiling for the SigNoz MCP reads. A server that accepts the socket
+# but never answers would otherwise block the synchronous bridge (and the whole
+# heal loop) forever; this bounds it so a hang surfaces as an error the fail-closed
+# sensors turn into UNKNOWN.
+MCP_TIMEOUT_S = float(os.getenv("MCP_TIMEOUT_S", "20"))
 
 # --- OpenTelemetry / SigNoz ---------------------------------------------------
 OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")

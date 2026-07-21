@@ -97,10 +97,16 @@ factor, and the same panels and alerts report YOUR joules and YOUR carbon.
 The GreenOps SLO is three state, like the agent's sensors and the Contract Lab's
 contracts:
 
-* **PASS**: energy per verified answer is at or under the budget (default 900 J).
-* **BREACH**: it is over budget. The cohort span is ERROR flagged and the alert pages.
-* **UNKNOWN**: fewer than the minimum verified answers (default 3). A tiny cohort can
-  never fire a false breach nor a false all clear.
+* **PASS**: energy per verified answer is at or under the joule budget (default 900 J)
+  AND the carbon budget (default 0.11 gCO2e per verified answer).
+* **BREACH**: it is over EITHER budget. The cohort span is ERROR flagged and the alert
+  pages. Enforcing both means a clean joule number can still breach on carbon, so the
+  configurable carbon knob is never dead config.
+* **UNKNOWN**: fewer than the minimum verified answers (default 3), OR answers verified
+  but no energy was recorded at all (missing token counts, or an accounting failure). A
+  zero joule reading is a broken measurement, not free work, so it is UNKNOWN, never a
+  comforting PASS. A tiny or unmeasurable cohort can never fire a false breach nor a
+  false all clear.
 
 The budget lives in `energy.yaml`. It was calibrated from a real run so a clean cohort
 passes and the retry fault breaches (see below).
@@ -155,6 +161,8 @@ span attributes the verdict grades on:
 
 `watt_report.py --gate` exits non-zero when a cohort breaches the budget, so the same
 GreenOps verdict SigNoz alerts on can also fail a pull request before the waste ships.
+It also fails closed on UNKNOWN: an unjudgeable run (too few verified answers, or no
+energy recorded) is never quietly green-lit as a pass.
 
 ```
 python watt_report.py                        # control vs a retry fault, compared
@@ -174,7 +182,7 @@ python watt_dashboard.py
 python watt_alert.py --ensure
 
 # 3. The pure model and the fail closed verifier, no network needed:
-python tests/run_all.py        # includes test_energy (18) + test_watttrace (8)
+python tests/run_all.py        # includes test_energy (20) + test_watttrace (10)
 
 # 4. Optional live end to end smoke: drives the real agent, exports to SigNoz, then
 #    queries SigNoz back to prove the run's trace landed (skips if the stack is down):

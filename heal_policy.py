@@ -130,7 +130,7 @@ class Policy:
     def __init__(self, autonomy=None, auto_max_risk=None, approved=None):
         self.autonomy = (autonomy or os.getenv("HEAL_AUTONOMY", "auto")).strip().lower()
         if self.autonomy not in AUTONOMY_LEVELS:
-            self.autonomy = "auto"
+            self.autonomy = "observe"   # fail closed: a typo must never escalate autonomy
         self.auto_max_risk = (auto_max_risk
                               or os.getenv("HEAL_AUTO_MAX_RISK", "low")).strip().lower()
         if self.auto_max_risk not in RISK_ORDER:
