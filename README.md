@@ -242,7 +242,10 @@ The suite emits the whole run to SigNoz as traces and metrics on the `watttrace`
 service, self verifies a nine panel GreenOps dashboard, and ships two alerts (an energy
 budget breach and a retry energy waste warning). The pure model and the runner's fail
 closed verifier are covered by `tests/test_energy.py` and `tests/test_watttrace.py`
-(network free). Full writeup: [`docs/TRACK03_WATTTRACE.md`](docs/TRACK03_WATTTRACE.md).
+(network free). A separate live smoke, `python tests/test_watttrace_live.py` (opt in with
+`WATTTRACE_LIVE_SMOKE=1`), drives the real agent end to end and then queries SigNoz back
+to prove the run's trace actually landed. Full writeup:
+[`docs/TRACK03_WATTTRACE.md`](docs/TRACK03_WATTTRACE.md).
 
 ## Repo layout
 

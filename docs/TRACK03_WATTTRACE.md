@@ -23,7 +23,7 @@ that waste into a graded, alertable, trace backed verdict.
 | Alerts | WattTrace Energy Budget Breach (critical), WattTrace Retry Energy Waste (warning) |
 | Runner | [`watt_report.py`](../watt_report.py) |
 | Plug and play model | [`energy.py`](../energy.py), [`energy.yaml`](../energy.yaml) |
-| Tests | [`tests/test_energy.py`](../tests/test_energy.py) (18) + [`tests/test_watttrace.py`](../tests/test_watttrace.py) (8), network free |
+| Tests | [`tests/test_energy.py`](../tests/test_energy.py) (18) + [`tests/test_watttrace.py`](../tests/test_watttrace.py) (8), network free, plus [`tests/test_watttrace_live.py`](../tests/test_watttrace_live.py) (opt in live end to end) |
 
 ## Why this is different
 
@@ -175,6 +175,11 @@ python watt_alert.py --ensure
 
 # 3. The pure model and the fail closed verifier, no network needed:
 python tests/run_all.py        # includes test_energy (18) + test_watttrace (8)
+
+# 4. Optional live end to end smoke: drives the real agent, exports to SigNoz, then
+#    queries SigNoz back to prove the run's trace landed (skips if the stack is down):
+set WATTTRACE_LIVE_SMOKE=1
+python tests/test_watttrace_live.py
 ```
 
 ## Live proof
