@@ -1,0 +1,108 @@
+# WattTrace GreenOps: the ONE file you edit to make the energy model yours.
+#
+# Everything about ENERGY and CARBON lives here (and in energy.py's built-in
+# defaults): how many watts your machine draws while a model is generating, how
+# dirty your electricity grid is, what a kWh costs, and the GreenOps budget the
+# alert and the CI gate enforce. Plug in your own numbers by editing this file
+# or by setting a few WATT_* environment variables. No code changes, no redeploy.
+#
+# HONEST NOTE ON THE NUMBERS: WattTrace ESTIMATES energy from active power draw
+# times wall clock time. It is a power model, not a hardware sensor reading. If
+# you have RAPL, Kepler, or a wall meter, feed those measured watts in here (or
+# wire a measured source) and the estimate becomes a measurement. Every figure
+# below is a published, dated public average so the model works with zero setup.
+
+watttrace:
+  # Active electrical power a machine draws WHILE a model is generating, in
+  # watts, by hardware tier. Pick the tier that matches your inference box, or
+  # add your own. These are typical sustained-load figures, not peak. Each tier
+  # declares HOW its watts were obtained (source_kind), which WattTrace stamps
+  # onto every estimate so a proxy figure is never mistaken for a measurement:
+  #   measured        a wall meter or RAPL reading you fed in       -> MEASURED
+  #   configured      a value your team calibrated for this box     -> ESTIMATED
+  #   hardware_proxy  a typical published figure for this tier      -> ESTIMATED
+  #   fallback        the generic last-resort default               -> FALLBACK
+  hardware:
+    default_tier: cpu-desktop
+    # When even the chosen tier cannot be resolved, WattTrace uses this one and
+    # marks the estimate FALLBACK.
+    fallback_tier: generic-cpu-fallback
+    tiers:
+      generic-cpu-fallback:
+        active_watts: 42.5
+        source_kind: fallback
+        note: "CodeCarbon generic CPU fallback: 85W TDP times 50 percent utilisation"
+      cpu-desktop:
+        active_watts: 65.0
+        source_kind: hardware_proxy
+        note: "typical desktop CPU package under sustained load (65W class TDP)"
+      cpu-laptop:
+        active_watts: 28.0
+        source_kind: hardware_proxy
+        note: "typical laptop CPU package under sustained load (28W class TDP)"
+      gpu-consumer:
+        active_watts: 200.0
+        source_kind: hardware_proxy
+        note: "consumer inference GPU board power (RTX 3060/4060 class)"
+      gpu-server:
+        active_watts: 350.0
+        source_kind: hardware_proxy
+        note: "datacenter inference GPU board power (A100/L40 class)"
+      calibrated-example:
+        active_watts: 71.0
+        source_kind: measured
+        note: "example of a wall-meter reading you took during a real Ollama run"
+
+  # Power Usage Effectiveness: multiply IT power by this for facility overhead
+  # (cooling, power delivery). 1.0 = a local box with no datacenter overhead;
+  # about 1.5 is a typical cloud datacenter; hyperscalers report about 1.1.
+  pue: 1.0
+
+  # Grid carbon intensity in grams CO2-equivalent per kWh, by region. Source:
+  # published national and regional grid averages. Pick where your compute runs.
+  grid:
+    default_region: world
+    regions:
+      world:   { gco2_per_kwh: 445.0,   year: 2024, source: "Ember Global Electricity Review 2025; retrieved 2026-07-21" }
+      us:      { gco2_per_kwh: 369.473, year: 2023, source: "Our World in Data / CodeCarbon energy mix; retrieved 2026-07-21" }
+      eu:      { gco2_per_kwh: 251.0,   year: 2023, source: "EEA 2023 EU-27 average; retrieved 2026-07-21" }
+      india:   { gco2_per_kwh: 713.441, year: 2023, source: "Our World in Data / CodeCarbon energy mix; retrieved 2026-07-21" }
+      germany: { gco2_per_kwh: 380.950, year: 2023, source: "Our World in Data / CodeCarbon energy mix; retrieved 2026-07-21" }
+      france:  { gco2_per_kwh: 56.039,  year: 2023, source: "Our World in Data / CodeCarbon energy mix (nuclear heavy); retrieved 2026-07-21" }
+      norway:  { gco2_per_kwh: 30.0,    year: 2023, source: "Ember 2023 Norway (hydro); retrieved 2026-07-21" }
+
+  # Electricity price in USD per kWh, for a dollar view of energy. This is the
+  # cost of the POWER, separate from the LLM token price in economics.yaml.
+  electricity_usd_per_kwh: 0.1341   # US EIA 2025 commercial average; retrieved 2026-07-21
+
+  # Optional per-model power multiplier: a bigger model pins the machine harder
+  # per second than a tiny one. Leave everything at 1.0 to price purely on wall
+  # clock time (the machine draws its tier watts regardless of which model runs).
+  model_factor:
+    default: 1.0
+
+  # How a call's active time is derived, and the throughput that models it.
+  # basis "tokens" (default) computes active time from token counts, which is
+  # DETERMINISTIC and immune to cold-start / CPU-contention noise: prefill runs
+  # the whole input in parallel (fast), decode emits output one token at a time
+  # (slow). basis "walltime" uses the raw measured duration instead (physically
+  # exact but noisy on a shared CPU). Either way energy = active_watts * time *
+  # PUE, and the measured wall time is always recorded alongside for comparison.
+  basis: tokens
+  throughput:
+    prefill_tokens_per_sec: 200.0   # typical 3B-model prefill on a desktop CPU
+    decode_tokens_per_sec: 8.0      # typical 3B-model decode on a desktop CPU
+
+  # GreenOps SLO: the north-star budget. WattTrace's headline metric is JOULES
+  # PER VERIFIED ANSWER (energy spent divided by answers that actually passed
+  # verification). The alert fires and the CI gate fails when a run exceeds this.
+  # minimum_verified_answers guards against a divide-by-tiny spike: below it the
+  # verdict is UNKNOWN, never a false BREACH and never a false healthy. The
+  # numbers below are tuned to the reference golden workload in watt_report.py on
+  # a 65W desktop CPU (a clean run lands near 700 J per verified answer; a run
+  # under the retry fault near 1060). A company sets its own budget for its own
+  # workload and hardware.
+  budget:
+    joules_per_verified_answer: 900.0
+    gco2_per_verified_answer: 0.11
+    minimum_verified_answers: 3

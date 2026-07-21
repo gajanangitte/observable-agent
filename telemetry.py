@@ -6,6 +6,7 @@ All three signals are configured explicitly so every agent run produces:
   * trace-correlated logs (each log line carries the active trace_id)
 """
 import logging
+import os
 
 from opentelemetry import metrics, trace
 from opentelemetry._logs import set_logger_provider
@@ -122,6 +123,15 @@ def record_llm(model, input_tokens, output_tokens, latency_ms, status="ok"):
         span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
         span.set_attribute("gen_ai.usage.total_tokens", input_tokens + output_tokens)
         span.set_attribute("gen_ai.usage.cost_usd", round(cost, 6))
+    # WattTrace GreenOps live hook: attach an energy/carbon estimate to this same
+    # call. Off by default (WATTTRACE_LIVE); fully guarded so it can never break
+    # a real inference path.
+    if os.getenv("WATTTRACE_LIVE"):
+        try:
+            import watt_metrics
+            watt_metrics.on_llm(model, input_tokens, output_tokens, latency_ms, status)
+        except Exception:
+            pass
     return cost
 
 

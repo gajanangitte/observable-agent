@@ -205,6 +205,45 @@ at your request volume, and the cost of the outage class the agent cleared
 unattended. The whole surface is covered by `tests/test_economics.py` (network
 free).
 
+## GreenOps: energy and carbon per verified answer (plug and play)
+
+Track 03. A token dashboard tells you what you spent. WattTrace tells you what you
+BURNED, and how much of it was waste. It drives the real agent over a fixed,
+deterministically graded question set and reports one north star: the joules spent per
+VERIFIED answer. Retries and failed calls spend real energy for zero extra correct
+answers, so that wasted energy shows up as a carbon and cost regression you can alert on.
+
+The physics is a plug and play model, mirroring the economics layer. Everything you
+tune for your own hardware and grid lives in [`energy.yaml`](energy.yaml):
+
+1. built-in defaults in `energy.py` (a 65 W desktop CPU proxy, the world grid at
+   445 gCO2e per kWh, real cited figures), so a fresh offline clone just works,
+2. `energy.yaml` (the single file you edit: hardware tiers, grid regions, the budget), and
+3. a few `WATT_*` environment variables for quick per run overrides.
+
+Energy is modelled deterministically from token counts (prefill throughput for the
+input, decode throughput for the output) times the tier's active power draw times PUE.
+That makes the retry tax exact and reproducible instead of hostage to a noisy CPU wall
+clock. The measured wall time is still recorded alongside as a cross check, and you can
+switch the basis to `walltime` or feed a real wall meter reading (which is then stamped
+MEASURED).
+
+Honesty is built in. Every estimate carries its provenance: a `method` (rapl,
+configured, hardware_proxy, or fallback) and a `quality` (MEASURED, ESTIMATED, or
+FALLBACK). A run folds to its weakest estimate, so a green board built on a guess is
+labelled a guess, never presented as a measurement. The verdict is fail closed and
+three state: below a minimum sample it is UNKNOWN, never a false all clear, and a run
+with zero verified answers reports UNKNOWN energy per answer, never a comforting zero.
+
+    python watt_report.py                        # control vs a retry fault, compared
+    python watt_report.py --fault retry --gate   # exit non-zero if the fault breaches budget
+
+The suite emits the whole run to SigNoz as traces and metrics on the `watttrace`
+service, self verifies a nine panel GreenOps dashboard, and ships two alerts (an energy
+budget breach and a retry energy waste warning). The pure model and the runner's fail
+closed verifier are covered by `tests/test_energy.py` and `tests/test_watttrace.py`
+(network free). Full writeup: [`docs/TRACK03_WATTTRACE.md`](docs/TRACK03_WATTTRACE.md).
+
 ## Repo layout
 
 | File | Purpose |
@@ -226,12 +265,19 @@ free).
 | `mcp2_contracts.py` / `mcp2_model.py` | The pure, network free certification core: eight three state reliability contracts + drift fingerprint (44 unit tests) |
 | `mcp2_probe.py` / `mcp2_metrics.py` | Auto instrumentation layer: emits `mcp.*` client spans + `mcp.client.*` metrics per call, empirical safe read discovery, in process fault injection |
 | `mcp2_dashboard.py` / `mcp2_alert.py` | The lab's SigNoz dashboard (self verified panels, exported JSON) and its breach + blind spot alerts |
+| `energy.py` | **Plug and play GreenOps model**: deterministic token-basis energy, carbon and cost, the fail-closed joules-per-verified-answer verdict, and estimate provenance; layered defaults → `energy.yaml` → env |
+| `energy.yaml` | The one file you edit for your hardware and grid (active-watt tiers with provenance, grid carbon regions, the energy budget) |
+| `watt_metrics.py` | WattTrace OTel layer: energy / carbon / token / answer / duration instruments + the always-on `on_llm` hook (decoupled, safe no-op offline) |
+| `watt_report.py` | **WattTrace GreenOps suite (Track 03)**: drives the agent over a graded set, scores joules per verified answer control vs retry fault, emits traces + metrics on service `watttrace`; `--gate` exits non-zero on a budget breach (CI gate) |
+| `watt_dashboard.py` / `watt_alert.py` | The GreenOps SigNoz dashboard (nine self verified panels, exported JSON) and its energy budget breach + retry waste alerts |
 | `docs/SELF_HEALING.md` | Competition project writeup + hero run screenshots |
 | `docs/TRACK02.md` | Signals and Dashboards writeup: the three signal dashboard, its nine panels, and the Query Builder techniques |
 | `docs/TRACK02_MCP2.md` | **MCP Contract Lab** writeup: observability as tests for the MCP protocol, the eight contracts, the three signals, and the alerts |
+| `docs/TRACK03_WATTTRACE.md` | **WattTrace GreenOps** writeup (Track 03): joules per verified answer, the honest estimate model, the retry tax as a carbon regression, the dashboard, alerts, and the CI gate |
 | `blog/` | Blog posts, screenshots, and the SigNoz login/dashboard/capture scripts |
 
 ## Notes on honesty
 
 - **Cost is illustrative by default, real when you want it.** Local Ollama is free; `economics.yaml` applies a per 1M token rate so cost observability can be demonstrated on a laptop. It also ships real, cited hosted prices and cost of downtime benchmarks, so pointing `gen_ai.system` at `openai`/`anthropic` and dropping in your contract rates makes the same panels and the `[IMPACT]` report track real dollars.
 - **CPU inference is slow**, which is a feature here: the latency tail is real, so there's actually something to observe.
+- **Energy is a model, not a meter.** WattTrace estimates joules from token counts and an active power figure; every number is stamped MEASURED, ESTIMATED, or FALLBACK so a fallback is never shown as a reading. Feed it a RAPL or wall meter value and the same panels track measured energy.

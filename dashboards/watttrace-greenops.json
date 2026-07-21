@@ -1,0 +1,846 @@
+{
+  "description": "One Query Builder dashboard reads the energy cost of the local agent from two OpenTelemetry signals: traces (the watt.cohort GreenOps verdicts carrying watttrace.status and the north-star joules per verified answer, plus the energy-tagged llm.chat spans with their disposition, joules per token, latency, and estimate provenance) and metrics (watttrace.answer.count for the verified answer rate). Every energy figure is a modelled estimate stamped with its quality, never a hardware reading presented as measured. Set the time range to the last 3 hours.",
+  "layout": [
+    {
+      "h": 4,
+      "i": "84c4b18b-c5b7-4516-9730-91996ec27410",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "h": 4,
+      "i": "9d7b919e-15c8-4b2b-8bfe-369f71b961c4",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 4,
+      "y": 0
+    },
+    {
+      "h": 6,
+      "i": "61988892-0dcd-4172-b365-c59fccd8076f",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 8,
+      "y": 0
+    },
+    {
+      "h": 4,
+      "i": "bfefa7a3-50ef-4a10-aac4-f30e82108faf",
+      "moved": false,
+      "static": false,
+      "w": 3,
+      "x": 0,
+      "y": 4
+    },
+    {
+      "h": 6,
+      "i": "5b519608-3ab6-400c-8479-64c439594ae7",
+      "moved": false,
+      "static": false,
+      "w": 5,
+      "x": 3,
+      "y": 4
+    },
+    {
+      "h": 6,
+      "i": "52a35dd0-5f27-46ab-a2b3-f357f3247526",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 8,
+      "y": 6
+    },
+    {
+      "h": 4,
+      "i": "5407bdcd-df99-4a30-b5d7-e4b4e9e02085",
+      "moved": false,
+      "static": false,
+      "w": 3,
+      "x": 0,
+      "y": 8
+    },
+    {
+      "h": 7,
+      "i": "d5ed27a4-a1b5-470f-af8f-6ddb42c04516",
+      "moved": false,
+      "static": false,
+      "w": 6,
+      "x": 0,
+      "y": 12
+    },
+    {
+      "h": 7,
+      "i": "71d7b2f7-5517-4331-9475-a1ecca3b52e1",
+      "moved": false,
+      "static": false,
+      "w": 6,
+      "x": 6,
+      "y": 12
+    }
+  ],
+  "panelMap": {},
+  "tags": [
+    "watttrace",
+    "greenops",
+    "energy",
+    "carbon",
+    "sustainability",
+    "traces",
+    "metrics",
+    "query-builder",
+    "track03",
+    "hackathon"
+  ],
+  "title": "WattTrace GreenOps: energy per verified answer (traces + metrics)",
+  "uploadedGrafana": false,
+  "variables": {},
+  "version": "v5",
+  "widgets": [
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: the north star. Each watt.cohort span carries the joules spent per VERIFIED answer. The retry-fault cohort should sit clearly above the clean one for the same answers: that gap is wasted energy.",
+      "fillSpans": false,
+      "id": "84c4b18b-c5b7-4516-9730-91996ec27410",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "bar",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "avg(watttrace.joules_per_verified_answer)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'watttrace' AND name = 'watt.cohort'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "watt.cohort--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "watt.cohort",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{watt.cohort}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "862a6e93-53ca-4c32-ad75-079223c23700",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Energy per verified answer: control vs retry fault (J)",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: cohorts whose energy per verified answer blew the GreenOps budget. Fail closed: a run with too few verified answers is UNKNOWN, never a silent pass.",
+      "fillSpans": false,
+      "id": "9d7b919e-15c8-4b2b-8bfe-369f71b961c4",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'watttrace' AND name = 'watt.cohort' AND watttrace.status = 'BREACH'"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": {
+                "expression": ""
+              },
+              "legend": "breaches",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "04774740-416e-4ab7-ae5d-3c748f0dc786",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Budget breaches",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: watt.cohort spans split by verdict. UNKNOWN is an honest third state for a run that could not be judged, kept separate from PASS.",
+      "fillSpans": false,
+      "id": "61988892-0dcd-4172-b365-c59fccd8076f",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "pie",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'watttrace' AND name = 'watt.cohort'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "watttrace.status--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "watttrace.status",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{watttrace.status}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "bb55875a-62cc-4893-8542-1d508f4fb244",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "GreenOps verdict mix (PASS / BREACH / UNKNOWN)",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 4,
+      "description": "TRACES: modelled energy per token on the llm.chat spans, by model. The efficiency knob: a smaller or better-served model moves this down.",
+      "fillSpans": false,
+      "id": "bfefa7a3-50ef-4a10-aac4-f30e82108faf",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "avg(watttrace.energy.j_per_token)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'watttrace' AND name = 'llm.chat'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "gen_ai.request.model--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "gen_ai.request.model",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{gen_ai.request.model}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "4b3f8abd-883d-4d03-8498-aceb77ec5518",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Joules per token by model",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: energy on llm.chat calls whose work was thrown away (a dropped retry or a failed answer). The clean cohort should be near zero; the retry-fault cohort carries the tax.",
+      "fillSpans": false,
+      "id": "5b519608-3ab6-400c-8479-64c439594ae7",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "bar",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "sum(watttrace.energy.j)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'watttrace' AND name = 'llm.chat' AND watttrace.energy.disposition = 'wasted'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "experiment.id--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "experiment.id",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{experiment.id}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "7cfdee1a-192f-4a97-96c0-4aef35c74e08",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Wasted retry energy by cohort (J)",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: every joule on llm.chat spans, split into work that produced a verified answer and work that was retried or failed. The wasted slice is the retry tax made visible.",
+      "fillSpans": false,
+      "id": "52a35dd0-5f27-46ab-a2b3-f357f3247526",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "pie",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "sum(watttrace.energy.j)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'watttrace' AND name = 'llm.chat'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "watttrace.energy.disposition--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "watttrace.energy.disposition",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{watttrace.energy.disposition}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "8764051c-e15d-454e-84a6-bf2451ebe779",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Energy by disposition (useful vs wasted)",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: p95 wall-clock of the llm.chat spans by model. Energy is modelled from token counts, so this stays an independent cross-check of the run.",
+      "fillSpans": false,
+      "id": "5407bdcd-df99-4a30-b5d7-e4b4e9e02085",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "p95(duration_nano)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'watttrace' AND name = 'llm.chat'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "gen_ai.request.model--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "gen_ai.request.model",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{gen_ai.request.model}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "ed60bb35-03e3-4b8a-bef7-2095b649f508",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Inference latency p95 by model",
+      "yAxisUnit": "ns"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: how each energy number was arrived at. A green board that is built on FALLBACK guesses is labelled as such, never presented as measured.",
+      "fillSpans": false,
+      "id": "d5ed27a4-a1b5-470f-af8f-6ddb42c04516",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "pie",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'watttrace' AND name = 'llm.chat'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "watttrace.estimate.quality--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "watttrace.estimate.quality",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{watttrace.estimate.quality}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "f6bc164e-f595-445c-af66-bffd72583ef8",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Estimate provenance (MEASURED / ESTIMATED / FALLBACK)",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "METRICS: watttrace.answer.count split by verification. The denominator of the north star: energy only counts against answers that were actually right.",
+      "fillSpans": false,
+      "id": "71d7b2f7-5517-4331-9475-a1ecca3b52e1",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "pie",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "watttrace.answer.count",
+                  "spaceAggregation": "sum",
+                  "temporality": "",
+                  "timeAggregation": "count"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": ""
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "verified--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "verified",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{verified}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "227682f5-9316-4a4b-ad41-d1dba97470ed",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Verified vs unverified answers",
+      "yAxisUnit": "none"
+    }
+  ]
+}

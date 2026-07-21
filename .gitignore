@@ -8,6 +8,8 @@ heal_state.json
 heal_baseline.json
 heal_memory.json
 mcp2_report.json
+watt_report.json
+_watt_*.json
 .signoz_api_key
 *.log
 state.json
