@@ -23,7 +23,7 @@ that waste into a graded, alertable, trace backed verdict.
 | Alerts | WattTrace Energy Budget Breach (critical), WattTrace Retry Energy Waste (warning) |
 | Runner | [`watt_report.py`](../watt_report.py) |
 | Plug and play model | [`energy.py`](../energy.py), [`energy.yaml`](../energy.yaml) |
-| Tests | [`tests/test_energy.py`](../tests/test_energy.py) (18) + [`tests/test_watttrace.py`](../tests/test_watttrace.py) (8), network free, plus [`tests/test_watttrace_live.py`](../tests/test_watttrace_live.py) (opt in live end to end) |
+| Tests | [`tests/test_energy.py`](../tests/test_energy.py) (20) + [`tests/test_watttrace.py`](../tests/test_watttrace.py) (10), network free, plus [`tests/test_watttrace_live.py`](../tests/test_watttrace_live.py) (opt in live end to end) |
 
 ## Why this is different
 
@@ -216,3 +216,61 @@ than bolted on. It makes the retry tax, already told in tokens, into a carbon an
 SLO you can alert and gate on. That is a GreenOps loop for agents, and it is the same
 detect, judge, verify discipline this repo uses everywhere, pointed at the one resource
 nobody else in the room is measuring.
+
+## Cross track finale: the carbon verdict becomes a heal sensor
+
+The three tracks in this repo are not three separate demos. They share one telemetry
+spine, and this is where they close into a single loop. The WattTrace energy model
+(Track 03) is now a **sensor for the self healer** (Track 01), read through the SigNoz
+MCP server (the protocol Track 02 certifies).
+
+Run it:
+
+```
+python self_heal.py --scenario carbon
+```
+
+The healer already knew how to detect a retry SLO breach and clear it. The new
+`carbon_slo` sensor in [`heal_sensors.py`](../heal_sensors.py) reads the SAME `llm.chat`
+spans, but prices them with the WattTrace energy model in [`energy.py`](../energy.py).
+It charges every token to real joules and grams of CO2e, then asks the question a token
+dashboard cannot: how much of that energy was WASTED on dropped and retried calls that
+served no answer. A retry spends real watts for a second copy of an answer you already
+had, so the retry tax that Track 03 measures as wasted carbon is exactly what the healer
+now detects and closes.
+
+The breach signal is the **share of the cohort's inference energy wasted on retries**,
+held to the same 5 percent floor the retry SLO uses. That choice is deliberate and
+calibration free. A healthy cohort wastes zero energy, so it always passes, which means a
+verified fix can never be rolled back by ordinary run to run token noise. Gating instead
+on an absolute joules per answer budget would be fragile here: this SRE agent makes
+several reasoning and tool calls per answer, so its healthy footprint (about 867 J per
+answer measured live) sits just under the single call WattTrace reference budget of 900 J,
+with no safe margin for a verify step. The total footprint per answer is still reported,
+and it falls as the waste is removed, for the dashboard and the impact story.
+
+Because the mechanism is the same wasted retry, the SAME fix heals it. The carbon
+scenario seeds the same broken state as the retry scenario and hands the model the same
+mitigations (`disable_fault_injection`, `enable_mitigation`), each still cleared by the
+policy gate before it can act. The loop is unchanged: detect the breach through MCP,
+let the local model read the incident and pick a fix, apply it behind the gate, then
+re verify the carbon SLO through MCP and record the footprint drop. A fix that does not
+drive the wasted energy back under the floor is rolled back, and a run with answers but
+no recorded token energy is UNKNOWN, never a false green.
+
+Two new histograms land on the `self-healer` service so SigNoz shows the footprint fall
+as the healer works: `heal.energy.joules_per_answer` (J) and
+`heal.carbon.grams_per_answer` (g), each tagged `phase` pre and post. The same figures
+carry the fail closed honesty of the rest of the stack: a blind sensor (MCP down) is
+UNKNOWN and the loop refuses to act, and the carbon verdict never reports a comforting
+zero for a broken meter.
+
+The result is one story a judge can follow end to end: a reliability fault (Track 01)
+is also a sustainability regression (Track 03), detected and healed over the open
+protocol (Track 02), on a self hosted SigNoz stack, with governance and rollback around
+every action. Covered by [`tests/test_greenops.py`](../tests/test_greenops.py) (8,
+network free): a wasted energy breach, a clean pass, a heavy but retry free pass that
+proves the SLO gates on waste not on an absolute cap, a sub threshold pass, the three
+fail closed UNKNOWN paths (zero energy, no answers yet, MCP down), plus a check that the
+sensor's totals
+match the WattTrace model exactly so the heal SLO and the Track 03 verdict never drift.

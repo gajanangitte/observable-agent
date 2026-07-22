@@ -29,6 +29,7 @@ _SLO_SIGNATURE = {
     "retry_tax": "retry.reason=response_dropped",
     "cost_runaway": "runaway_llm_loop",
     "latency": "latency_p95_breach",
+    "carbon_slo": "wasted_retry_energy",
 }
 
 # Severity buckets by how far the observed value is past the threshold.
@@ -46,6 +47,9 @@ def _observed_threshold(slo):
     if name == "latency":
         return (float(slo.get("p95_ms") or 0.0),
                 float(slo.get("threshold_ms", 60000) or 60000))
+    if name == "carbon_slo":
+        return (float(slo.get("wasted_fraction", 0.0) or 0.0),
+                float(slo.get("threshold_fraction", 0.05) or 0.05))
     return float(slo.get("observed", 0.0) or 0.0), float(slo.get("threshold", 1.0) or 1.0)
 
 

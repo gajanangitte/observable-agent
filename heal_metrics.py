@@ -47,6 +47,13 @@ def init():
     _m["cpr"] = meter.create_histogram(
         "heal.cost.calls_per_request", unit="1",
         description="Observed llm.chat calls per request per cohort, pre vs post heal")
+    # ---- GreenOps carbon / energy (Track 03 verdict as a heal SLO) -------
+    _m["carbon"] = meter.create_histogram(
+        "heal.carbon.grams_per_answer", unit="g",
+        description="Observed gCO2e per answer served per cohort, pre vs post heal")
+    _m["energy"] = meter.create_histogram(
+        "heal.energy.joules_per_answer", unit="J",
+        description="Observed joules per answer served per cohort, pre vs post heal")
     # ---- eval / chaos harness -------------------------------------------
     _m["eval_episode"] = meter.create_counter(
         "heal.eval.episode", unit="{episode}",
@@ -105,6 +112,13 @@ def cost_spend(usd, cohort, phase):
 
 def calls_per_request(value, cohort, phase):
     _m["cpr"].record(value, {"cohort": cohort, "phase": phase})
+
+
+def carbon_footprint(grams_per_answer, joules_per_answer, cohort, phase):
+    """Record a cohort's carbon and energy per answer, pre vs post heal, so SigNoz
+    shows the GreenOps footprint drop when the healer clears the retry-tax waste."""
+    _m["carbon"].record(grams_per_answer, {"cohort": cohort, "phase": phase})
+    _m["energy"].record(joules_per_answer, {"cohort": cohort, "phase": phase})
 
 
 def eval_episode(scenario, outcome, decider):

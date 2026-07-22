@@ -17,8 +17,10 @@ trace-correlated structured heal logs, checked with in-memory OTel exporters
 (test_telemetry) -- the MCP Contract Lab's pure certification core: the eight
 three-state reliability contracts, the drift fingerprint / diff, and the grade
 folding, all on hand-built observations (test_mcp2_contracts) -- and the WattTrace
-runner's fail-closed answer verifier plus its energy accumulator (test_watttrace).
-They need neither SigNoz, Ollama, nor the network.
+runner's fail-closed answer verifier plus its energy accumulator (test_watttrace),
+and the cross-track GreenOps finale -- the carbon / energy SLO sensor that grades a
+cohort with the WattTrace model and folds it into the healer's three-state logic
+(test_greenops). They need neither SigNoz, Ollama, nor the network.
 """
 import importlib
 import os
@@ -42,6 +44,7 @@ MODULES = [
     "tests.test_telemetry",
     "tests.test_mcp2_contracts",
     "tests.test_watttrace",
+    "tests.test_greenops",
 ]
 
 

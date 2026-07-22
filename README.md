@@ -41,6 +41,7 @@ be **held for human approval** instead.
 ```bash
 python self_heal.py                    # heal the retry tax incident
 python self_heal.py --scenario cost    # heal the bill shock / runaway spend incident
+python self_heal.py --scenario carbon  # heal a GreenOps carbon / energy SLO breach
 ```
 
 **Hands off, SigNoz triggered.** You do not have to launch the heal yourself. A
@@ -107,6 +108,7 @@ python agent.py "Is the checkout service healthy?"
 ```bash
 python self_heal.py                    # retry tax incident:  retry rate 40% → 0%
 python self_heal.py --scenario cost    # bill shock incident: arms a cost kill switch
+python self_heal.py --scenario carbon  # GreenOps incident:   joules + gCO2e / answer back under budget
 ```
 Each run prints the timeline, MTTR, and a link to the `agent.heal` trace in SigNoz. Full walkthrough with screenshots: [`docs/SELF_HEALING.md`](docs/SELF_HEALING.md).
 
@@ -247,6 +249,20 @@ closed verifier are covered by `tests/test_energy.py` and `tests/test_watttrace.
 to prove the run's trace actually landed. Full writeup:
 [`docs/TRACK03_WATTTRACE.md`](docs/TRACK03_WATTTRACE.md).
 
+**Cross track finale.** The GreenOps verdict is not just a scoreboard, it is a heal
+sensor. `python self_heal.py --scenario carbon` points the self healer (Track 01) at
+this energy model: the `carbon_slo` sensor reads the same `llm.chat` spans through the
+SigNoz MCP server (Track 02), prices them to joules and grams of CO2e with the WattTrace
+model, then breaches on the share of that energy WASTED on dropped and retried calls (the
+retry tax, priced in carbon, held to the same 5 percent floor as the retry SLO). Because
+a healthy cohort wastes zero energy, the signal is calibration free and the heal's verify
+can never be rolled back by token noise. The SAME policy gated mitigation that fixes
+reliability also fixes sustainability: measured live, energy per answer fell from about
+1176 J to 867 J as roughly 309 J per answer of wasted retry energy went to zero. The
+healer records `heal.energy.joules_per_answer` and `heal.carbon.grams_per_answer` (pre
+and post) so SigNoz shows the footprint drop. One loop, three tracks. See the cross track
+section in [`docs/TRACK03_WATTTRACE.md`](docs/TRACK03_WATTTRACE.md).
+
 ## Repo layout
 
 | File | Purpose |
@@ -258,7 +274,7 @@ to prove the run's trace actually landed. Full writeup:
 | `economics.py` | **Plug and play money model**: token prices, cost of downtime, cost SLO, spend budget, and the `[IMPACT]` report; layered defaults → `economics.yaml` → env |
 | `economics.yaml` | The one file you edit to plug in your own numbers (real, cited pricing + downtime profiles) |
 | `run_load.py` | Traffic generator (varied SRE questions, incl. an error path) |
-| `self_heal.py` | **Competition project**: governed closed loop orchestrator (`agent.heal` trace); `--scenario {retry,cost}` |
+| `self_heal.py` | **Competition project**: governed closed loop orchestrator (`agent.heal` trace); `--scenario {retry,cost,carbon}` |
 | `heal_bridge.py` | Turns a **SigNoz alert** into a governed heal (poll + webhook), in the alert's own trace, then watches SigNoz mark it resolved |
 | `heal_policy.py` | **Governance gate**: autonomy levels + per action risk/reversibility/blast radius; the allow list every mutation passes through |
 | `heal_*.py` | Self healing modules: sensors (MCP SLO detectors: retry tax + cost), actuators (policy gated, incl. the cost kill switch), control plane (+ snapshot/rollback), canary rollout, metrics, dashboard |

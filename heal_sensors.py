@@ -16,6 +16,7 @@ import heal_baseline
 import heal_fingerprint
 import heal_stats
 import economics
+import energy
 
 TARGET_SERVICE = "observable-agent"   # the managed workload the healer watches
 RETRY_SLO_MAX_RATE = 0.05             # > 5% dropped-and-retried llm.chat = breach
@@ -209,6 +210,94 @@ def cost_slo(mcp, cohort, time_range="20m"):
         "headline": (f"{calls} llm.chat calls across {reqs} request(s) = "
                      f"{cpr:.1f}/request (~${spent:.6f} spend) vs SLO max "
                      f"{COST_SLO_MAX_CALLS_PER_REQ}/request in cohort '{cohort}'{note}."),
+    }
+
+
+def carbon_slo(mcp, cohort, time_range="20m"):
+    """GreenOps carbon / energy SLO: the retry tax, measured in joules and grams of
+    CO2e instead of tokens. This is the cross-track sensor. It reads the SAME
+    ``llm.chat`` spans the retry sensor reads, but grades them with the WattTrace
+    energy model (``energy.py``, Track 03): it charges every token to real energy,
+    then asks how much of that energy was WASTED on dropped-and-retried calls that
+    served no answer. A retry spends real watts for a second copy of an answer you
+    already had, so the healer can now detect and close a sustainability breach, not
+    just a reliability one.
+
+    The breach decision is the wasted-energy FRACTION (share of the cohort's joules
+    burned on dropped calls), thresholded at the same ``RETRY_SLO_MAX_RATE`` the
+    retry SLO uses. That is deliberately calibration-free: a healthy cohort wastes
+    zero energy and always passes, so a verified fix (no drops) can never be rolled
+    back by run-to-run token noise, unlike gating on an absolute per-answer budget
+    (this multi-call SRE workload legitimately spends far more per answer than the
+    single-call WattTrace agent, so its healthy footprint sits near that budget). The
+    total footprint per answer is still reported (and drops as the waste is removed),
+    for the dashboard and the impact story.
+
+    Energy is modelled from the cohort's summed token usage, so a reading with answers
+    but no recorded tokens is a broken meter -> UNKNOWN, never a free PASS (the same
+    fail-closed zero guard the WattTrace verdict uses)."""
+    svc = f"service.name = '{TARGET_SERVICE}' AND experiment.id = '{cohort}'"
+    llm = svc + " AND name = 'llm.chat'"
+    dropped = llm + " AND retry.reason = 'response_dropped'"
+    answers = _count(mcp, svc + " AND name = 'agent.invoke'", time_range)
+    in_tok = _sum(mcp, "gen_ai.usage.input_tokens", llm, time_range)
+    out_tok = _sum(mcp, "gen_ai.usage.output_tokens", llm, time_range)
+    if answers is None or in_tok is None or out_tok is None:
+        return _unknown("carbon_slo", cohort,
+                        "SigNoz query failed (MCP unreachable or errored)", retryable=False)
+    if answers == 0:
+        return _unknown("carbon_slo", cohort,
+                        "no agent.invoke answers observed yet for this cohort", retryable=True)
+    est = energy.estimate(input_tokens=int(in_tok), output_tokens=int(out_tok))
+    total_joules = float(est.joules)
+    total_grams = float(est.grams_co2)
+    if total_joules <= 0:
+        # Answers served but zero modelled energy == missing token usage, a broken
+        # meter. Never a free green PASS; surface it as UNKNOWN so the loop refuses.
+        return _unknown("carbon_slo", cohort,
+                        "answers served but no token energy recorded (missing usage)",
+                        retryable=True)
+    # Energy burned on dropped-and-retried calls: the retry tax, priced in joules.
+    # A failed token sum here is treated as zero waste (best effort), never as an
+    # excuse to fail the whole reading -- the totals above already gate on UNKNOWN.
+    d_in = _sum(mcp, "gen_ai.usage.input_tokens", dropped, time_range) or 0.0
+    d_out = _sum(mcp, "gen_ai.usage.output_tokens", dropped, time_range) or 0.0
+    west = energy.estimate(input_tokens=int(d_in), output_tokens=int(d_out))
+    wasted_joules = float(west.joules)
+    wasted_grams = float(west.grams_co2)
+    joules_per_answer = total_joules / answers
+    grams_per_answer = total_grams / answers
+    wasted_joules_per_answer = wasted_joules / answers
+    wasted_grams_per_answer = wasted_grams / answers
+    wasted_fraction = wasted_joules / total_joules if total_joules > 0 else 0.0
+    hard_breach = wasted_fraction > RETRY_SLO_MAX_RATE
+    status, anomaly_only, stats = _classify("carbon_slo", wasted_joules_per_answer, hard_breach)
+    budget_j = energy.budget_joules_per_verified_answer()   # WattTrace reference, informational
+    fp = heal_fingerprint.fingerprint(
+        {"slo": "carbon_slo", "wasted_fraction": wasted_fraction,
+         "threshold_fraction": RETRY_SLO_MAX_RATE})
+    note = " [statistical anomaly vs baseline, not a fixed-floor breach]" if anomaly_only else ""
+    return {
+        "slo": "carbon_slo", "cohort": cohort, "status": status, "known": True,
+        "answers": answers, "input_tokens": int(in_tok), "output_tokens": int(out_tok),
+        "joules": round(total_joules, 1), "grams_co2": round(total_grams, 4),
+        "joules_per_answer": round(joules_per_answer, 1),
+        "grams_per_answer": round(grams_per_answer, 5),
+        "wasted_joules": round(wasted_joules, 1), "wasted_grams_co2": round(wasted_grams, 5),
+        "wasted_joules_per_answer": round(wasted_joules_per_answer, 1),
+        "wasted_grams_per_answer": round(wasted_grams_per_answer, 6),
+        "wasted_fraction": round(wasted_fraction, 4),
+        "threshold_fraction": RETRY_SLO_MAX_RATE,
+        "budget_joules": budget_j, "over_ref_budget": joules_per_answer > budget_j,
+        "breached": status == STATUS_BREACH, "hard_breach": hard_breach,
+        "anomaly_only": anomaly_only,
+        "baseline": stats["baseline"], "sigma": stats["sigma"],
+        "fingerprint": fp.as_dict(),
+        "headline": (f"{wasted_fraction:.0%} of this cohort's inference energy was wasted on "
+                     f"retries: {wasted_joules_per_answer:.0f} J of {joules_per_answer:.0f} J "
+                     f"per answer ({grams_per_answer:.4f} gCO2e/answer total), across "
+                     f"{answers} answer(s) vs SLO max {RETRY_SLO_MAX_RATE:.0%} waste in "
+                     f"cohort '{cohort}'{note}."),
     }
 
 

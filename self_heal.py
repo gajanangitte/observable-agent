@@ -15,11 +15,14 @@ policy gate before it can act, and a fix that fails to verify is rolled back:
     |-- heal.verify         MCP: is the SLO back in bounds? -> healed; record MTTR
     |-- heal.rollback       (only if verify still breached: revert the change)
 
-Two incidents ship here (``--scenario``): ``retry`` heals the retry-tax (a
+Three incidents ship here (``--scenario``): ``retry`` heals the retry-tax (a
 dropped-and-retried response) with ``disable_fault_injection``; ``cost`` heals a
 runaway-spend / bill-shock loop by arming a per-request cost circuit-breaker
-(``set_cost_budget``). Every action clears ``heal_policy`` first -- low-risk
-reversible fixes auto-apply, riskier ones are held for human approval.
+(``set_cost_budget``); ``carbon`` heals a GreenOps sustainability breach, where the
+SAME wasted retries burn real joules and grams of CO2e that the WattTrace (Track 03)
+model prices, surfaced as the share of a cohort's inference energy wasted on retries and
+cleared by the same retry mitigation. Every action clears ``heal_policy`` first --
+low-risk reversible fixes auto-apply, riskier ones are held for human approval.
 
 The managed workload (observable-agent) runs as canary SUBPROCESSES so each
 rollout picks up the new config fresh -- a real rollout, not an in-process
@@ -99,6 +102,13 @@ HEAL_TASK_COST = (
     "remediation best supported by that evidence to bring spend back within the SLO. "
     "Remediate now."
 )
+HEAL_TASK_CARBON = (
+    "A GreenOps carbon and energy SLO was breached in rollout cohort '{cohort}': a "
+    "large share of the CO2e and joules spent per answer is being wasted on "
+    "dropped-and-retried calls that served no answer. Investigate the incident with "
+    "read_incident, then apply the single remediation best supported by that evidence "
+    "to bring the wasted energy back within the SLO. Remediate now."
+)
 
 MAX_HEAL_ATTEMPTS = 2
 
@@ -133,6 +143,17 @@ def _cost_record(slo, cohort, phase):
     heal_metrics.calls_per_request(slo["calls_per_request"], cohort, phase)
 
 
+def _carbon_value(slo):
+    return ("carbon/answer",
+            f"{slo['grams_per_answer']:.4f} gCO2e ({slo['joules_per_answer']:.0f} J)",
+            slo["grams_per_answer"])
+
+
+def _carbon_record(slo, cohort, phase):
+    heal_metrics.carbon_footprint(slo["grams_per_answer"], slo["joules_per_answer"],
+                                  cohort, phase)
+
+
 SCENARIOS = {
     "retry": Scenario(
         name="retry_tax",
@@ -150,6 +171,14 @@ SCENARIOS = {
         actions=("set_cost_budget", "switch_model"),
         task=HEAL_TASK_COST, fallback="set_cost_budget",
         value_of=_cost_value, record=_cost_record),
+    "carbon": Scenario(
+        name="carbon_slo",
+        title="SELF-HEALING SRE SIDEKICK   (GreenOps carbon / energy SLO incident)",
+        seed=lambda c: c.reset(state=BROKEN),
+        sensor=heal_sensors.carbon_slo,
+        actions=("disable_fault_injection", "enable_mitigation"),
+        task=HEAL_TASK_CARBON, fallback="disable_fault_injection",
+        value_of=_carbon_value, record=_carbon_record),
 }
 
 
