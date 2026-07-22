@@ -326,6 +326,18 @@ def test_verdict_breaches_on_carbon_even_when_joules_pass():
     assert ok.status == energy.PASS
 
 
+def test_verdict_non_finite_energy_is_unknown():
+    _reset()
+    # A non-finite reading (nan/inf joules or grams, e.g. a corrupted token count or a
+    # divide gone wrong) must never slip through as a PASS: nan <= 0 is False, so the
+    # old zero-guard alone would have PASSED it. Now it is UNKNOWN, refusing to judge.
+    assert energy.verdict(float("nan"), float("nan"), 5).status == energy.UNKNOWN
+    assert energy.verdict(float("inf"), 0.5, 5).status == energy.UNKNOWN
+    v = energy.verdict(float("nan"), float("nan"), 5)
+    assert v.joules_per_verified_answer is None
+    assert "no energy" in v.reason
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

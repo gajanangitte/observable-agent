@@ -7,6 +7,7 @@ the detection hot path -- detection and verification are deterministic; the
 model is only asked to *decide* what to do about a confirmed breach.
 """
 import json
+import math
 import time
 
 from opentelemetry import trace
@@ -107,6 +108,21 @@ def _sum(mcp, attr, filter_expr, time_range="20m"):
     if parsed is _FAILED:
         return None
     return _scalar(parsed)
+
+
+def _sum_checked(mcp, attr, filter_expr, time_range="20m"):
+    """Fail-closed sum: returns None ONLY when the query itself FAILED (so the caller
+    must refuse to judge), and 0.0 for a query that ran and matched nothing. Unlike
+    ``_sum`` (which collapses both to None), this lets a breach numerator tell a real
+    outage apart from a genuine zero, so a failed read is never scored as zero waste."""
+    parsed = _agg(mcp, {
+        "aggregation": "sum", "aggregateOn": attr,
+        "filter": filter_expr, "timeRange": time_range, "limit": "5",
+    })
+    if parsed is _FAILED:
+        return None
+    val = _scalar(parsed)
+    return float(val) if val is not None else 0.0
 
 
 def _unknown(slo, cohort, reason, retryable):
@@ -251,17 +267,26 @@ def carbon_slo(mcp, cohort, time_range="20m"):
     est = energy.estimate(input_tokens=int(in_tok), output_tokens=int(out_tok))
     total_joules = float(est.joules)
     total_grams = float(est.grams_co2)
-    if total_joules <= 0:
-        # Answers served but zero modelled energy == missing token usage, a broken
-        # meter. Never a free green PASS; surface it as UNKNOWN so the loop refuses.
+    if not math.isfinite(total_joules) or total_joules <= 0:
+        # Answers served but zero or non-finite modelled energy == missing token
+        # usage or a broken meter. Never a free green PASS; surface it as UNKNOWN
+        # so the loop refuses.
         return _unknown("carbon_slo", cohort,
-                        "answers served but no token energy recorded (missing usage)",
+                        "answers served but no valid token energy recorded "
+                        "(missing or non-finite usage)",
                         retryable=True)
     # Energy burned on dropped-and-retried calls: the retry tax, priced in joules.
-    # A failed token sum here is treated as zero waste (best effort), never as an
-    # excuse to fail the whole reading -- the totals above already gate on UNKNOWN.
-    d_in = _sum(mcp, "gen_ai.usage.input_tokens", dropped, time_range) or 0.0
-    d_out = _sum(mcp, "gen_ai.usage.output_tokens", dropped, time_range) or 0.0
+    # Fail CLOSED on these reads too: a query that ERRORED must not be scored as zero
+    # waste (a silent PASS that would then verify-heal a still-broken cohort). Only a
+    # query that RAN and matched nothing is a true zero. _sum_checked draws exactly
+    # that line (None only on failure), so a transient dropped-query outage surfaces
+    # as UNKNOWN, matching the fail-closed totals gate above and the retry SLO.
+    d_in = _sum_checked(mcp, "gen_ai.usage.input_tokens", dropped, time_range)
+    d_out = _sum_checked(mcp, "gen_ai.usage.output_tokens", dropped, time_range)
+    if d_in is None or d_out is None:
+        return _unknown("carbon_slo", cohort,
+                        "SigNoz query for dropped-and-retried energy failed "
+                        "(MCP unreachable or errored)", retryable=False)
     west = energy.estimate(input_tokens=int(d_in), output_tokens=int(d_out))
     wasted_joules = float(west.joules)
     wasted_grams = float(west.grams_co2)

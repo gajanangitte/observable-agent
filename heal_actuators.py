@@ -228,4 +228,9 @@ def build(mcp, controls, cohort, decisions, actions=("disable_fault_injection", 
     }
     advertised = ["read_incident"] + [a for a in actions]
     schemas = [catalogue[name] for name in advertised]
+    # Scope the executable registry to exactly what we advertised. The model is only
+    # handed the advertised schemas, but returning the full registry would let an
+    # off-prompt or hallucinated call reach an un-advertised mutation; keep them in
+    # lockstep so a tool that was never offered can never be invoked.
+    registry = {name: registry[name] for name in advertised}
     return schemas, registry

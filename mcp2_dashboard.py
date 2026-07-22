@@ -200,8 +200,16 @@ def verify(qd):
             d = json.loads(r.read())
         n = 0
         for res in (d.get("data", {}).get("data", {}).get("results") or []):
+            # metrics scalar shape: aggregations[].series[]
             for a in (res.get("aggregations") or []):
                 n += len(a.get("series") or [])
+            # traces/logs scalar shape: columns[] + data rows (one row per group)
+            cols = res.get("columns") or []
+            agg_idx = [i for i, c in enumerate(cols)
+                       if c.get("columnType") == "aggregation"]
+            for row in (res.get("data") or []):
+                if (any(row[i] is not None for i in agg_idx) if agg_idx else bool(row)):
+                    n += 1
         return True, n
     except urllib.error.HTTPError as e:
         return False, e.read().decode()[:160]

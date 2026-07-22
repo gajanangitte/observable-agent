@@ -30,6 +30,7 @@ defaults are used, so nothing ever hard-fails.
 from __future__ import annotations
 
 import copy
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -353,12 +354,12 @@ class Energy:
                            b.joules_per_verified_answer,
                            reason=f"only {verified} verified answers "
                                   f"(need {b.minimum_verified_answers} to judge)")
-        if total_joules <= 0:
+        if not math.isfinite(total_joules) or total_joules <= 0:
             return Verdict(UNKNOWN, None, gpa, verified, total_joules, total_grams,
                            b.joules_per_verified_answer,
                            reason=f"{verified} verified answers but no energy was "
-                                  f"recorded (missing token counts or an accounting "
-                                  f"failure); refusing a zero all-clear")
+                                  f"recorded (missing token counts, a non-finite figure, "
+                                  f"or an accounting failure); refusing a zero all-clear")
         over_j = jpa is not None and jpa > b.joules_per_verified_answer
         over_c = (gpa is not None and b.gco2_per_verified_answer > 0
                   and gpa > b.gco2_per_verified_answer)

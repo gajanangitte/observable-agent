@@ -20,7 +20,9 @@ folding, all on hand-built observations (test_mcp2_contracts) -- and the WattTra
 runner's fail-closed answer verifier plus its energy accumulator (test_watttrace),
 and the cross-track GreenOps finale -- the carbon / energy SLO sensor that grades a
 cohort with the WattTrace model and folds it into the healer's three-state logic
-(test_greenops). They need neither SigNoz, Ollama, nor the network.
+(test_greenops). They need neither SigNoz, Ollama, nor the network. The MCP client
+facade's text extraction and its isError fail-closed raise are covered too, with a
+stubbed transport (test_mcp_client).
 """
 import importlib
 import os
@@ -45,6 +47,7 @@ MODULES = [
     "tests.test_mcp2_contracts",
     "tests.test_watttrace",
     "tests.test_greenops",
+    "tests.test_mcp_client",
 ]
 
 

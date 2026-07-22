@@ -311,9 +311,12 @@ def main():
                     ds.set_attribute(k, v)
             print("  " + slo["headline"])
 
-        # A blind sensor (MCP down) must NEVER be read as 'healthy'. If we cannot
-        # see, we cannot claim there is nothing to heal -- surface it and stop.
-        if slo["status"] == heal_sensors.STATUS_UNKNOWN and not slo.get("retryable"):
+        # A blind sensor must NEVER be read as 'healthy'. _settle_read already
+        # exhausted its retries for a retryable (ingestion-lag) UNKNOWN, so ANY
+        # UNKNOWN that survives to here means we still cannot see the workload --
+        # e.g. a canary that produced no telemetry because Ollama was down. Refuse
+        # to claim there is nothing to heal; surface it and stop.
+        if slo["status"] == heal_sensors.STATUS_UNKNOWN:
             root.set_attribute("heal.sensor_blind", True)
             root.set_status(Status(StatusCode.ERROR, "sensor blind: " + slo.get("reason", "")))
             _banner("SENSOR BLIND -- REFUSING TO ACT")

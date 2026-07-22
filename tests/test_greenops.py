@@ -31,17 +31,24 @@ class FakeMCP:
     input vs output. ``fail`` simulates an MCP outage; a None token value simulates a
     query that ran but matched no rows."""
 
-    def __init__(self, answers, in_tok, out_tok, drop_in=0, drop_out=0, fail=False):
+    def __init__(self, answers, in_tok, out_tok, drop_in=0, drop_out=0, fail=False,
+                 fail_dropped=False):
         self.url = "http://fake/mcp"
         self._answers = answers
         self._in, self._out = in_tok, out_tok
         self._din, self._dout = drop_in, drop_out
         self._fail = fail
+        self._fail_dropped = fail_dropped
 
     def call_tool(self, name, args):
         if self._fail:
             raise RuntimeError("MCP down")
         f = args.get("filter", "")
+        # Simulate ONLY the dropped-and-retried energy query failing (the totals read
+        # fine). This is the fail-open trap: a broken numerator read must not be scored
+        # as zero waste and handed back as a false PASS.
+        if self._fail_dropped and "retry.reason" in f:
+            raise RuntimeError("MCP down (dropped-call query)")
         on = args.get("aggregateOn", "")
         if "agent.invoke" in f:
             v = self._answers
@@ -133,6 +140,21 @@ def test_carbon_model_matches_energy_module():
     slo = hs.carbon_slo(FakeMCP(answers=4, in_tok=1600, out_tok=200), "c")
     assert abs(slo["joules"] - round(float(est.joules), 1)) < 0.5
     assert abs(slo["joules_per_answer"] - float(est.joules) / 4) < 0.5
+
+
+def test_carbon_unknown_when_dropped_query_fails():
+    # Fail-closed on the BREACH NUMERATOR too: if the totals read fine but the
+    # dropped-and-retried energy query ERRORS, the sensor must refuse (UNKNOWN,
+    # not retryable), NEVER read the failure as zero waste and return a false PASS
+    # that would then verify-heal a still-broken cohort. (Regression: the dropped
+    # reads previously used ``_sum(...) or 0.0``, which swallowed a failed query.)
+    mcp = FakeMCP(answers=3, in_tok=3000, out_tok=300, drop_in=1200, drop_out=60,
+                  fail_dropped=True)
+    slo = hs.carbon_slo(mcp, "c")
+    assert slo["status"] == hs.STATUS_UNKNOWN
+    assert slo["known"] is False
+    assert slo["retryable"] is False
+    assert slo["breached"] is False
 
 
 def _run():

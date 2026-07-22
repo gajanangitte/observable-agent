@@ -51,7 +51,14 @@ def _mcp_call(mcp, tool_name, args):
         span.set_attribute("mcp.method", "tools/call")
         span.set_attribute("mcp.tool.name", tool_name)
         span.set_attribute("mcp.request.args", json.dumps(args)[:500])
-        raw = mcp.call_tool(tool_name, args)
+        try:
+            raw = mcp.call_tool(tool_name, args)
+        except Exception as e:
+            # call_tool RAISES on an MCP-side error (isError) or transport failure.
+            # Introspection is a best-effort read, not a heal decision, so surface the
+            # failure as a graceful error dict rather than crashing the whole session.
+            span.set_status(Status(StatusCode.ERROR, f"MCP call failed: {e}"))
+            return {"error": f"MCP call failed: {e}", "tool": tool_name}
         span.set_attribute("mcp.response.bytes", len(raw or ""))
         # Some SigNoz tools append a plain-text pagination hint after the JSON
         # body ("note: returned N rows ..."), so decode just the first JSON value

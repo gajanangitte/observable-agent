@@ -71,6 +71,17 @@ def test_switch_model_enum_rejected_when_approved():
     assert good["applied"] is True and good["model"] == "llama3.2:1b"
 
 
+def test_registry_scoped_to_advertised_tools():
+    # The executable registry must expose ONLY the advertised tools (read_incident +
+    # the actions offered this cycle). A tool that exists in the catalogue but was
+    # NOT advertised must be absent, so an off-prompt or hallucinated call can never
+    # reach an un-advertised mutation.
+    registry, _ = _build(("set_cost_budget",))
+    assert set(registry) == {"read_incident", "set_cost_budget"}
+    for hidden in ("switch_model", "disable_fault_injection", "enable_mitigation"):
+        assert hidden not in registry
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

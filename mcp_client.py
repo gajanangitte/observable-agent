@@ -38,4 +38,10 @@ class SigNozMCP:
         """Call one MCP tool and return its concatenated text content."""
         result = self._run(lambda s: s.call_tool(name, args or {}))
         parts = [c.text for c in result.content if getattr(c, "type", None) == "text"]
-        return "\n".join(parts)
+        text = "\n".join(parts)
+        # An MCP tool that FAILED sets isError; its text is an error message, not a
+        # result. Raise so the fail-closed sensors convert it to their UNKNOWN sentinel
+        # instead of scoring the error string as real data (a false, comforting read).
+        if getattr(result, "isError", False):
+            raise RuntimeError(text or f"MCP tool '{name}' returned isError with no message")
+        return text
