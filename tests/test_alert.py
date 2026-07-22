@@ -1,4 +1,4 @@
-"""Unit tests for heal_alert: the three SLO-aligned alert specs.
+"""Unit tests for heal_alert: the four SLO-aligned alert specs.
 
 Guards the exact v5 shape the SigNoz alerts API needs AND the invariant that the
 alert thresholds ARE the healer's SLO constants (single source of truth), so an
@@ -52,6 +52,33 @@ def test_cost_alert_is_a_ratio_on_the_cost_slo():
     assert spec["labels"]["slo"] == "cost_runaway"
 
 
+def test_carbon_alert_is_a_ratio_on_the_carbon_slo():
+    spec = A.carbon_spec("5m", "local-webhook")
+    assert spec["alert"] == A.CARBON_ALERT
+    cond = spec["condition"]
+    # carbon SLO reuses the retry 5% floor: energy is linear in tokens, so wasted
+    # decode energy share == wasted retry share at the same threshold constant.
+    assert cond["target"] == S.RETRY_SLO_MAX_RATE
+    assert cond["op"] == "above"
+    assert cond["selectedQueryName"] == "F1"
+    qs = _queries(spec)
+    assert [q.get("type") for q in qs] == ["builder_query", "builder_query", "builder_formula"]
+    a, b, f = qs
+    assert a["spec"]["disabled"] is True and b["spec"]["disabled"] is True
+    assert f["spec"]["expression"] == "A/B"
+    # token-weighted energy: both legs aggregate output (decode) tokens
+    assert "output_tokens" in a["spec"]["aggregations"][0]["expression"]
+    assert "output_tokens" in b["spec"]["aggregations"][0]["expression"]
+    # numerator = dropped-and-retried decode energy, denominator = all decode energy
+    assert "response_dropped" in a["spec"]["filter"]["expression"]
+    assert "retry.reason" not in b["spec"]["filter"]["expression"]
+    # NOTIFY-ONLY: the retry alert is the trigger; this greenops lens must never
+    # launch a second heal off the same waste.
+    assert spec["labels"]["heal_role"] == "notify"
+    assert spec["labels"]["slo"] == "carbon_greenops"
+    assert spec["labels"]["severity"] == "warning"
+
+
 def test_backstop_alert_is_notify_only():
     spec = A.heal_spec("5m", "local-webhook")
     assert spec["alert"] == A.HEAL_ALERT
@@ -73,9 +100,9 @@ def test_every_spec_carries_channel_and_v5_version():
         assert spec["version"] == "v5"
 
 
-def test_alert_names_are_the_three_stable_identities():
+def test_alert_names_are_the_four_stable_identities():
     names = {fn("5m", "c")["alert"] for fn in A.ALERT_SPECS}
-    assert names == {A.RETRY_ALERT, A.COST_ALERT, A.HEAL_ALERT}
+    assert names == {A.RETRY_ALERT, A.COST_ALERT, A.CARBON_ALERT, A.HEAL_ALERT}
 
 
 def test_missing_channel_yields_empty_channel_list():

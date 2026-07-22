@@ -265,6 +265,16 @@ carry the fail closed honesty of the rest of the stack: a blind sensor (MCP down
 UNKNOWN and the loop refuses to act, and the carbon verdict never reports a comforting
 zero for a broken meter.
 
+The same GreenOps SLO is also a live SigNoz alert. [`heal_alert.py`](../heal_alert.py)
+now ensures a fourth rule, **Agent GreenOps Carbon SLO: inference energy wasted on
+retries**, a trace based threshold on the share of decode energy (output tokens) spent on
+dropped and retried calls, held to the same 5 percent floor. Energy is linear in tokens,
+so this token weighted waste ratio is the alertable proxy for the joules wasted verdict
+the `carbon_slo` sensor grades on. It is notify only and labelled `heal_role=notify`: the
+retry tax alert is the trigger that launches the governed heal, and this carbon rule is
+the sustainability lens on the same waste, so the two never double fire on one incident.
+Ensure it with `python heal_alert.py --ensure` and read its live state with `--status`.
+
 The result is one story a judge can follow end to end: a reliability fault (Track 01)
 is also a sustainability regression (Track 03), detected and healed over the open
 protocol (Track 02), on a self hosted SigNoz stack, with governance and rollback around

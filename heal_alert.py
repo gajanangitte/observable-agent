@@ -8,6 +8,10 @@ alert that pages and the detector that acts can never drift apart:
                      managed workload exceeds the 5% SLO (a ratio, not "any retry").
   * Cost runaway  -- fires when ``llm.chat`` calls per ``agent.invoke`` request
                      exceed the 6-calls/request SLO (bill-shock).
+  * Carbon SLO    -- fires when more than 5% of the decode energy (output tokens)
+                     on the managed workload was spent on dropped-and-retried work:
+                     the retry tax priced in joules and grams of CO2e. NOTIFY-ONLY,
+                     the GreenOps lens on the same waste the retry alert triggers on.
   * Heal backstop -- fires when an ``agent.heal`` cycle ends with
                      ``heal.healed = false`` (the autonomous loop could not close;
                      page a human). This one is NOTIFY-ONLY: the bridge must never
@@ -17,7 +21,7 @@ alert that pages and the detector that acts can never drift apart:
 workload is fixed the same alert resolves. This script creates or updates every
 rule idempotently (matched by name) so the demo is reproducible.
 
-  python heal_alert.py --ensure                 # create/update all three alerts
+  python heal_alert.py --ensure                 # create/update all four alerts
   python heal_alert.py --status                 # show every rule's live state
   python heal_alert.py --ensure --window 5m --channel local-webhook
 
@@ -55,6 +59,7 @@ KEY = _KEYFILE.read_text().strip() if _KEYFILE.exists() else ""
 # updates it in place instead of orphaning the old rule.
 RETRY_ALERT = "Agent Retry Tax: LLM responses being retried"
 COST_ALERT = "Agent Cost Runaway: LLM calls per request above SLO"
+CARBON_ALERT = "Agent GreenOps Carbon SLO: inference energy wasted on retries"
 HEAL_ALERT = "Self-Healer backstop: an incident was not auto-resolved"
 
 
@@ -63,6 +68,15 @@ def _bq(name, filter_expr, disabled=False):
     return {"type": "builder_query", "spec": {
         "name": name, "signal": "traces", "disabled": disabled,
         "stepInterval": "1m", "aggregations": [{"expression": "count()"}],
+        "filter": {"expression": filter_expr}}}
+
+
+def _bq_agg(name, expr, filter_expr, disabled=False):
+    """A v5 traces builder query aggregating ``expr`` over spans matching a filter
+    (e.g. sum(gen_ai.usage.output_tokens)), for energy/token-weighted ratios."""
+    return {"type": "builder_query", "spec": {
+        "name": name, "signal": "traces", "disabled": disabled,
+        "stepInterval": "1m", "aggregations": [{"expression": expr}],
         "filter": {"expression": filter_expr}}}
 
 
@@ -126,6 +140,55 @@ def cost_spec(window, channel):
                      "request: a runaway, token-burning loop (bill shock)."))
 
 
+def carbon_spec(window, channel):
+    """GreenOps carbon SLO: the SHARE of decode energy (output tokens) spent on
+    dropped-and-retried llm.chat calls, above the same 5% floor the retry SLO uses.
+    Energy is linear in tokens, so a token-weighted waste ratio is the trace-level
+    proxy for the WattTrace joules-wasted verdict the carbon_slo heal sensor grades
+    on. NOTIFY-ONLY and labelled greenops: the retry alert is the trigger that acts;
+    this is the sustainability lens on the same waste, priced in energy and carbon."""
+    dropped = (f"service.name = '{TARGET_SERVICE}' AND name = 'llm.chat' "
+               "AND retry.reason = 'response_dropped'")
+    allcalls = f"service.name = '{TARGET_SERVICE}' AND name = 'llm.chat'"
+    tok = "sum(gen_ai.usage.output_tokens)"
+    return {
+        "alert": CARBON_ALERT,
+        "alertType": "TRACES_BASED_ALERT",
+        "ruleType": "threshold_rule",
+        "version": "v5",
+        "evalWindow": window,
+        "frequency": "1m",
+        "condition": {
+            "compositeQuery": {
+                "queryType": "builder",
+                "panelType": "graph",
+                "queries": [
+                    _bq_agg("A", tok, dropped, disabled=True),
+                    _bq_agg("B", tok, allcalls, disabled=True),
+                    {"type": "builder_formula", "spec": {"name": "F1", "expression": "A/B"}},
+                ],
+            },
+            "target": RETRY_SLO_MAX_RATE,
+            "op": "above",
+            "matchType": "at_least_once",
+            "selectedQueryName": "F1",
+        },
+        "preferredChannels": [channel] if channel else [],
+        # notify-only GreenOps lens: the retry alert is the trigger; heal_role=notify
+        # keeps heal_bridge.py from launching a second heal off the same waste.
+        "labels": {"severity": "warning", "slo": "carbon_greenops", "heal_role": "notify"},
+        "annotations": {
+            "summary": f"Wasted inference energy above the {RETRY_SLO_MAX_RATE:.0%} GreenOps SLO",
+            "description": (f"More than {RETRY_SLO_MAX_RATE:.0%} of the decode energy "
+                            f"(output tokens) on {TARGET_SERVICE} llm.chat calls was spent on "
+                            "dropped-and-retried work that produced no verified answer: the "
+                            "retry tax priced in joules and grams of CO2e, the same waste the "
+                            "WattTrace carbon_slo heal sensor detects and heals. Notify-only; "
+                            "the retry-tax alert is the trigger that launches the governed heal."),
+        },
+    }
+
+
 def heal_spec(window, channel):
     """Backstop: an agent.heal cycle ended unhealed. NOTIFY-ONLY (never a trigger)."""
     return {
@@ -160,7 +223,7 @@ def heal_spec(window, channel):
     }
 
 
-ALERT_SPECS = [retry_spec, cost_spec, heal_spec]
+ALERT_SPECS = [retry_spec, cost_spec, carbon_spec, heal_spec]
 
 
 def _req(method, path, body=None):
@@ -217,7 +280,7 @@ def status():
 
 def main():
     ap = argparse.ArgumentParser(description="Ensure the self-healing loop's SigNoz alerts")
-    ap.add_argument("--ensure", action="store_true", help="create or update all three alerts")
+    ap.add_argument("--ensure", action="store_true", help="create or update all four alerts")
     ap.add_argument("--status", action="store_true", help="print every rule's live state")
     ap.add_argument("--window", default=os.getenv("HEAL_ALERT_WINDOW", "5m"),
                     help="eval window (short = resolves quickly after a heal; default 5m)")
