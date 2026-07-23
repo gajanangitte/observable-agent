@@ -1,0 +1,49 @@
+<!doctype html>
+<!-- AccessTrace demo target: the ACCESSIBLE cohort. Same page as inaccessible.html
+     with every WCAG issue fixed: html lang, a document title, high-contrast nav,
+     a named home link, an alt on the image, a proper heading order, a labelled
+     input, and a named submit button. The AccessTrace journey should PASS here. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ship reliable agents | Acme</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; color: #1a1a1a; }
+    header { background: #fff; padding: 16px 24px; border-bottom: 1px solid #eee; }
+    nav a { margin-right: 16px; text-decoration: none; color: #1a3a8f; } /* AA contrast */
+    nav a.home { display: inline-flex; align-items: center; gap: 6px; }
+    main { padding: 24px; max-width: 720px; }
+    form { padding: 24px; max-width: 480px; }
+    label { display: block; font-weight: 600; margin-top: 8px; }
+    input { display: block; padding: 8px; width: 100%; box-sizing: border-box; margin: 8px 0; }
+    .cta { background: #1b4fd0; color: #fff; border: 0; padding: 10px 18px;
+           border-radius: 6px; cursor: pointer; font-size: 16px; }
+    .icon { display: inline-block; width: 20px; height: 20px; background: #1a3a8f; border-radius: 50%; }
+  </style>
+</head>
+<body>
+  <header id="site-header">
+    <nav aria-label="Primary">
+      <a href="#home" class="home"><span class="icon" aria-hidden="true"></span>Home</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#docs">Docs</a>
+    </nav>
+  </header>
+
+  <main id="content">
+    <h1>Ship reliable agents</h1>
+    <h2>Why it matters</h2>
+    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+         width="120" height="60" alt="Acme logo">
+    <p>Observe, alert, and heal your agents before your users feel it.</p>
+  </main>
+
+  <form id="signup">
+    <h2>Get updates</h2>
+    <label for="email">Work email</label>
+    <input id="email" type="email" placeholder="you@example.com">
+    <button type="submit" class="cta">Sign up</button>
+  </form>
+</body>
+</html>

@@ -112,6 +112,14 @@ python self_heal.py --scenario carbon  # GreenOps incident:   joules + gCO2e / a
 ```
 Each run prints the timeline, MTTR, and a link to the `agent.heal` trace in SigNoz. Full walkthrough with screenshots: [`docs/SELF_HEALING.md`](docs/SELF_HEALING.md).
 
+**6. See it *audit accessibility*** (optional, needs one browser download): drive a WCAG journey and watch which stage of the user flow breaks, as a trace on service `accesstrace`:
+```bash
+python -m playwright install chromium         # one time, downloads the headless browser
+python access_report.py                        # before/after demo: BREACH (weighted 40) vs PASS
+python access_report.py --url https://your.site --gate   # audit any live site; non-zero exit on a WCAG breach
+```
+Full writeup: [`docs/TRACK_ACCESSTRACE.md`](docs/TRACK_ACCESSTRACE.md).
+
 ---
 
 ## What it does
@@ -263,6 +271,28 @@ healer records `heal.energy.joules_per_answer` and `heal.carbon.grams_per_answer
 and post) so SigNoz shows the footprint drop. One loop, three tracks. See the cross track
 section in [`docs/TRACK03_WATTTRACE.md`](docs/TRACK03_WATTTRACE.md).
 
+## Accessibility as telemetry (AccessTrace)
+
+Same primitives, a signal nobody else is watching: whether a human on a keyboard or a
+screen reader can actually use the product. `python access_report.py` drives a real
+headless browser through an accessibility **journey** (land, reach the navigation,
+reach the main content, reach and fill the form), runs the axe-core WCAG ruleset at
+each stage, and grades it with the same fail closed three state verdict. The journey
+is a trace on the `accesstrace` service: an `access.journey` span per page carrying
+the WCAG verdict, and an `access.step` span per stage that shows **exactly which part
+of the user flow breaks**. A broken page and its fixed twin, driven through the
+identical journey, score BREACH (weighted debt 40, two critical plus four serious) vs
+PASS (0), a 100 percent reduction. The policy (WCAG tags, severity weights, budget)
+is plug and play in [`access.yaml`](access.yaml), and `--url` audits any live site you
+own. `--gate` turns the same verdict into a CI accessibility gate. It self verifies a
+nine panel dashboard and ships two alerts (a budget breach page and a stage localiser).
+Full writeup: [`docs/TRACK_ACCESSTRACE.md`](docs/TRACK_ACCESSTRACE.md).
+
+The dashboard builders all share one self verifying core, [`dashboard_kit.py`](dashboard_kit.py)
+(ProofKit): the Query Builder shapes, the widget envelope, and the dual shape result
+counter that proves every panel resolves against `/api/v5/query_range` before the
+dashboard is created. A new artifact gets a self verifying dashboard for free.
+
 ## Repo layout
 
 | File | Purpose |
@@ -289,10 +319,15 @@ section in [`docs/TRACK03_WATTTRACE.md`](docs/TRACK03_WATTTRACE.md).
 | `watt_metrics.py` | WattTrace OTel layer: energy / carbon / token / answer / duration instruments + the always-on `on_llm` hook (decoupled, safe no-op offline) |
 | `watt_report.py` | **WattTrace GreenOps suite (Track 03)**: drives the agent over a graded set, scores joules per verified answer control vs retry fault, emits traces + metrics on service `watttrace`; `--gate` exits non-zero on a budget breach (CI gate) |
 | `watt_dashboard.py` / `watt_alert.py` | The GreenOps SigNoz dashboard (nine self verified panels, exported JSON) and its energy budget breach + retry waste alerts |
+| `dashboard_kit.py` | **ProofKit**: the shared Query Builder dashboard core (query shapes, widget envelope, the dual shape result counter that self verifies every panel against `/api/v5/query_range`) |
+| `access_audit.py` / `access.yaml` | **Plug and play WCAG policy**: the fail closed three state accessibility verdict, severity weighted scoring, and the budget; layered defaults → `access.yaml` → `ACCESS_*` env |
+| `access_report.py` | **AccessTrace suite**: drives a real headless browser through an accessibility journey, runs axe-core per stage, emits traces + metrics on service `accesstrace`; `--url` audits any live site; `--gate` exits non-zero on a WCAG breach (CI gate) |
+| `access_metrics.py` / `access_dashboard.py` / `access_alert.py` | The AccessTrace OTel metric instruments, its self verified nine panel dashboard (via ProofKit), and its budget breach + breaching stage alerts |
 | `docs/SELF_HEALING.md` | Competition project writeup + hero run screenshots |
 | `docs/TRACK02.md` | Signals and Dashboards writeup: the three signal dashboard, its nine panels, and the Query Builder techniques |
 | `docs/TRACK02_MCP2.md` | **MCP Contract Lab** writeup: observability as tests for the MCP protocol, the eight contracts, the three signals, and the alerts |
 | `docs/TRACK03_WATTTRACE.md` | **WattTrace GreenOps** writeup (Track 03): joules per verified answer, the honest estimate model, the retry tax as a carbon regression, the dashboard, alerts, and the CI gate |
+| `docs/TRACK_ACCESSTRACE.md` | **AccessTrace** writeup: web accessibility as OpenTelemetry, the WCAG journey as a trace, the fail closed verdict, plug and play policy, the dashboard, alerts, and the CI gate |
 | `blog/` | Blog posts, screenshots, and the SigNoz login/dashboard/capture scripts |
 
 ## Notes on honesty

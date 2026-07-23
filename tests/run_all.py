@@ -22,7 +22,13 @@ and the cross-track GreenOps finale -- the carbon / energy SLO sensor that grade
 cohort with the WattTrace model and folds it into the healer's three-state logic
 (test_greenops). They need neither SigNoz, Ollama, nor the network. The MCP client
 facade's text extraction and its isError fail-closed raise are covered too, with a
-stubbed transport (test_mcp_client).
+stubbed transport (test_mcp_client). The shared ProofKit dashboard core is covered
+by test_dashboard_kit (the query_range spec translation and the dual-shape result
+counter that powers panel self-verification). Finally the AccessTrace WCAG artifact
+is covered offline: the plug-and-play accessibility audit model with its fail-closed
+three-state verdict, per-journey de-duplication and severity budget (test_accesstrace,
+which also exercises the runner's pure grading and reporting), and its two SigNoz
+alert specs (test_access_alert).
 """
 import importlib
 import os
@@ -48,6 +54,9 @@ MODULES = [
     "tests.test_watttrace",
     "tests.test_greenops",
     "tests.test_mcp_client",
+    "tests.test_dashboard_kit",
+    "tests.test_accesstrace",
+    "tests.test_access_alert",
 ]
 
 

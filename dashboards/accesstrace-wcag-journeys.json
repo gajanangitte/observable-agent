@@ -1,0 +1,817 @@
+{
+  "description": "AccessTrace turns web accessibility into OpenTelemetry. A real headless browser walks an accessibility JOURNEY through the product (land, reach the navigation, reach the main content, reach and fill the form), runs the axe-core WCAG ruleset at each stage, and grades it with a fail-closed three-state verdict. This board reads the resulting accesstrace service: the access.journey spans carry the per-journey verdict (a11y.status and the severity-weighted debt) and the access.step spans localise which stage of the flow breaks. Set the time range to the last 3 hours.",
+  "layout": [
+    {
+      "h": 4,
+      "i": "735d6178-24ad-489e-bebd-a0ce8e711aa2",
+      "moved": false,
+      "static": false,
+      "w": 3,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "h": 4,
+      "i": "e25b977c-075c-4c53-87cf-5db3975e01a4",
+      "moved": false,
+      "static": false,
+      "w": 3,
+      "x": 3,
+      "y": 0
+    },
+    {
+      "h": 4,
+      "i": "64b22f53-63e7-456a-b61d-3c7851c570d5",
+      "moved": false,
+      "static": false,
+      "w": 3,
+      "x": 6,
+      "y": 0
+    },
+    {
+      "h": 4,
+      "i": "d9b1588d-1f7c-4f6f-a2d8-8a0eadaad39f",
+      "moved": false,
+      "static": false,
+      "w": 3,
+      "x": 9,
+      "y": 0
+    },
+    {
+      "h": 6,
+      "i": "8546955f-6c78-4268-83f8-3ad18adc87b7",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 0,
+      "y": 4
+    },
+    {
+      "h": 6,
+      "i": "85b1e149-1fe2-45f7-9dc3-2345a0215244",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 4,
+      "y": 4
+    },
+    {
+      "h": 6,
+      "i": "4f91951e-412d-4f7d-bd10-71acc1b2e81a",
+      "moved": false,
+      "static": false,
+      "w": 4,
+      "x": 8,
+      "y": 4
+    },
+    {
+      "h": 7,
+      "i": "aa693988-be5e-4480-9787-955f5ae9a0cd",
+      "moved": false,
+      "static": false,
+      "w": 6,
+      "x": 0,
+      "y": 10
+    },
+    {
+      "h": 7,
+      "i": "c42db312-adb2-4c75-9b86-8eafcedce3c0",
+      "moved": false,
+      "static": false,
+      "w": 6,
+      "x": 6,
+      "y": 10
+    }
+  ],
+  "panelMap": {},
+  "tags": [
+    "accesstrace",
+    "accessibility",
+    "wcag",
+    "a11y",
+    "traces",
+    "metrics",
+    "query-builder",
+    "hackathon"
+  ],
+  "title": "AccessTrace: WCAG journeys (accessibility as telemetry)",
+  "uploadedGrafana": false,
+  "variables": {},
+  "version": "v5",
+  "widgets": [
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: accessibility journeys driven through the product and graded. Each is a real browser walking the flow: land, navigate, read, submit.",
+      "fillSpans": false,
+      "id": "735d6178-24ad-489e-bebd-a0ce8e711aa2",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'accesstrace' AND name = 'access.journey'"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": {
+                "expression": ""
+              },
+              "legend": "journeys",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "4d9c126a-3873-4290-8174-facbaba5a284",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "WCAG journeys graded",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: journeys that blew the WCAG budget (a critical or serious violation, or too much weighted debt). Fail closed: a journey that could not be exercised is UNKNOWN, never a silent pass.",
+      "fillSpans": false,
+      "id": "e25b977c-075c-4c53-87cf-5db3975e01a4",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'accesstrace' AND name = 'access.journey' AND a11y.status = 'BREACH'"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": {
+                "expression": ""
+              },
+              "legend": "breaches",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "47007c8f-0a89-4472-9b86-a60465d6ed29",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Journeys breaching WCAG",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: critical WCAG rules broken across the graded journeys (for example a control or image with no accessible name). These block a screen-reader user outright.",
+      "fillSpans": false,
+      "id": "64b22f53-63e7-456a-b61d-3c7851c570d5",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "sum(a11y.violations.critical)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'accesstrace' AND name = 'access.journey'"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": {
+                "expression": ""
+              },
+              "legend": "critical",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "672a66b3-b616-4062-b59a-7e8d3e87bf92",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Critical violations",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: serious WCAG rules broken (for example low colour contrast or a link with no discernible text). Zero tolerance in the default budget.",
+      "fillSpans": false,
+      "id": "d9b1588d-1f7c-4f6f-a2d8-8a0eadaad39f",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "sum(a11y.violations.serious)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'accesstrace' AND name = 'access.journey'"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": {
+                "expression": ""
+              },
+              "legend": "serious",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "5d60dee9-139b-4330-80a4-d8e8dde61bde",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Serious violations",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: the severity-weighted violation score per cohort (a critical weighs ten minors). The before/after gap between the inaccessible and accessible pages is the accessibility win made measurable.",
+      "fillSpans": false,
+      "id": "8546955f-6c78-4268-83f8-3ad18adc87b7",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "bar",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "avg(a11y.weighted_score)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'accesstrace' AND name = 'access.journey'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "a11y.cohort--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "a11y.cohort",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{a11y.cohort}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "d67292f9-6572-4cad-abe1-e80ec6f45167",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Weighted WCAG debt by cohort",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "METRICS: accesstrace.violation.count split by axe impact (critical / serious / moderate / minor), so the shape of the debt is visible, not just its total.",
+      "fillSpans": false,
+      "id": "85b1e149-1fe2-45f7-9dc3-2345a0215244",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "bar",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "accesstrace.violation.count",
+                  "spaceAggregation": "sum",
+                  "temporality": "",
+                  "timeAggregation": "count"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": ""
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "impact--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "impact",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{impact}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "d04bf45e-bba4-4204-80c2-61a4d6374dd4",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Violations by impact severity",
+      "yAxisUnit": "short"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: journeys split by verdict. UNKNOWN is an honest third state for a journey that could not be judged, kept separate from PASS so a blind audit never reads as an accessible product.",
+      "fillSpans": false,
+      "id": "4f91951e-412d-4f7d-bd10-71acc1b2e81a",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "pie",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'accesstrace' AND name = 'access.journey'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "a11y.status--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "a11y.status",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{a11y.status}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "4587fa32-7de6-4714-b883-240e7237fdcd",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "WCAG verdict mix (PASS / BREACH / UNKNOWN)",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: the weighted WCAG debt per cohort over time. Point this at your own site in CI and this line is your accessibility regression trend, release over release.",
+      "fillSpans": false,
+      "id": "aa693988-be5e-4480-9787-955f5ae9a0cd",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "graph",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "avg(a11y.weighted_score)"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'accesstrace' AND name = 'access.journey'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "a11y.cohort--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "a11y.cohort",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{a11y.cohort}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "19d71277-0a78-40b7-923c-9ec31b800d2a",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Weighted WCAG debt over time by cohort",
+      "yAxisUnit": "none"
+    },
+    {
+      "bucketCount": 30,
+      "bucketWidth": 0,
+      "columnUnits": {},
+      "decimalPrecision": 0,
+      "description": "TRACES: access.step spans that breached, grouped by journey stage (navigation, main content, form). A user experiences the page as a flow, and this shows exactly where the flow falls apart.",
+      "fillSpans": false,
+      "id": "c42db312-adb2-4c75-9b86-8eafcedce3c0",
+      "isLogScale": false,
+      "isStacked": false,
+      "legendPosition": "bottom",
+      "mergeAllActiveQueries": false,
+      "nullZeroValues": "zero",
+      "opacity": "1",
+      "panelTypes": "bar",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "expression": "count()"
+                }
+              ],
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'accesstrace' AND name = 'access.step' AND a11y.status = 'BREACH'"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "a11y.step--string--tag",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "a11y.step",
+                  "type": "tag"
+                }
+              ],
+              "having": {
+                "expression": ""
+              },
+              "legend": "{{a11y.step}}",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "source": "",
+              "stepInterval": null
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "clickhouse_sql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "id": "5a905edb-1b83-424f-a67d-5a5bae5a9d42",
+        "promql": [
+          {
+            "disabled": false,
+            "legend": "",
+            "name": "A",
+            "query": ""
+          }
+        ],
+        "queryType": "builder",
+        "unit": ""
+      },
+      "softMax": 0,
+      "softMin": 0,
+      "stackedBarChart": false,
+      "thresholds": [],
+      "timePreferance": "GLOBAL_TIME",
+      "title": "Breaching journey steps: which stage fails",
+      "yAxisUnit": "short"
+    }
+  ]
+}

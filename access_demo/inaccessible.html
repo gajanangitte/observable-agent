@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- AccessTrace demo target: the INACCESSIBLE cohort.
+     Every region below carries a real, axe-detectable WCAG failure so the journey
+     trace shows exactly which stage of the flow breaks. accessible.html is the same
+     page with every issue fixed. No lang attribute on <html> is itself a violation. -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- no <title>: axe document-title violation -->
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; color: #222; }
+    header { background: #fff; padding: 16px 24px; border-bottom: 1px solid #eee; }
+    nav a { margin-right: 16px; text-decoration: none; color: #b3b3b3; } /* low contrast */
+    main { padding: 24px; max-width: 720px; }
+    form { padding: 24px; max-width: 480px; }
+    input { display: block; padding: 8px; width: 100%; box-sizing: border-box; margin: 8px 0; }
+    .cta { background: #2d6cdf url(data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==) no-repeat center;
+           border: 0; width: 44px; height: 44px; border-radius: 6px; cursor: pointer; }
+    .icon { display: inline-block; width: 20px; height: 20px; background: #2d6cdf; border-radius: 50%; }
+  </style>
+</head>
+<body>
+  <header id="site-header">
+    <nav aria-label="Primary">
+      <!-- icon-only link with no text: axe link-name violation -->
+      <a href="#home"><span class="icon"></span></a>
+      <a href="#pricing">Pricing</a>
+      <a href="#docs">Docs</a>
+    </nav>
+  </header>
+
+  <main id="content">
+    <h1>Ship reliable agents</h1>
+    <!-- heading order skips h2/h3 -> h4: heading-order (best practice) -->
+    <h4>Why it matters</h4>
+    <!-- image with no alt: axe image-alt violation (critical) -->
+    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" width="120" height="60">
+    <p>Observe, alert, and heal your agents before your users feel it.</p>
+  </main>
+
+  <form id="signup">
+    <h4>Get updates</h4>
+    <!-- input with no associated label and no aria-label: axe label violation (critical) -->
+    <input type="email" placeholder="you@example.com">
+    <!-- button with no accessible name (icon only): axe button-name violation (critical) -->
+    <button type="submit" class="cta"></button>
+  </form>
+</body>
+</html>

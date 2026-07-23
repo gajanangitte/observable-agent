@@ -4,3 +4,4 @@ opentelemetry-exporter-otlp-proto-http>=1.27.0
 python-dotenv>=1.0.1
 PyYAML>=6.0
 mcp>=1.28.1
+playwright>=1.49.0  # AccessTrace only (WCAG journeys); after install run: playwright install chromium

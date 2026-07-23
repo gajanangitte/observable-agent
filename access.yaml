@@ -1,0 +1,41 @@
+# AccessTrace: plug-and-play accessibility (WCAG) policy.
+#
+# This is the ONE file a team edits to make the accessibility SLO its own. It is
+# optional: delete it and the built-in defaults in access_audit.py take over, so a
+# fresh clone and the tests still work. Precedence, lowest to highest:
+#   1. built-in defaults in access_audit.py
+#   2. this file (point ACCESS_CONFIG elsewhere to swap it per environment)
+#   3. ACCESS_* environment variables (ACCESS_MAX_CRITICAL, ACCESS_MAX_SERIOUS,
+#      ACCESS_MAX_WEIGHTED, ACCESS_MIN_STEPS, ACCESS_WCAG_TAGS)
+#
+# The verdict is fail closed: a journey that could not be exercised far enough to
+# judge is UNKNOWN, never a green PASS.
+
+# Which axe-core rule tags to enforce. WCAG 2.1 AA is the bar most accessibility
+# law leans on (ADA, EN 301 549, Section 508). Add "best-practice" to also enforce
+# axe best practice rules, or narrow to ["wcag2a"] for a lighter gate.
+wcag_tags:
+  - wcag2a
+  - wcag2aa
+  - wcag21a
+  - wcag21aa
+
+# How much one violated rule of each severity weighs in the per journey score.
+# A critical (for example a control with no accessible name) is worth ten minors.
+severity_weights:
+  critical: 10.0
+  serious: 5.0
+  moderate: 2.0
+  minor: 1.0
+
+budget:
+  # Zero tolerance for the two severities that actually block a keyboard or screen
+  # reader user: any critical or serious violation breaches the SLO.
+  max_critical: 0
+  max_serious: 0
+  # Weighted score ceiling per journey (sum of weight times violated rule count).
+  # 0 means any weighted violation breaches. Raise it to carry a known backlog of
+  # minor issues while still gating new regressions.
+  max_weighted_score: 0.0
+  # Fail closed below this many completed journey steps.
+  minimum_steps: 1

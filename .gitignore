@@ -10,6 +10,7 @@ heal_memory.json
 mcp2_report.json
 watt_report.json
 _watt_*.json
+access_report.json
 .signoz_api_key
 *.log
 state.json
