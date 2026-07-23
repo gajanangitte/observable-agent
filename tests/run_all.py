@@ -28,7 +28,9 @@ counter that powers panel self-verification). Finally the AccessTrace WCAG artif
 is covered offline: the plug-and-play accessibility audit model with its fail-closed
 three-state verdict, per-journey de-duplication and severity budget (test_accesstrace,
 which also exercises the runner's pure grading and reporting), and its two SigNoz
-alert specs (test_access_alert).
+alert specs (test_access_alert). The MCP instrumentation proxy's pure core is covered
+by test_mcp2_proxy: JSON-RPC request parsing, SSE and JSON response parsing, and the
+outcome grading that mirrors the hand-written probe's telemetry vocabulary.
 """
 import importlib
 import os
@@ -57,6 +59,7 @@ MODULES = [
     "tests.test_dashboard_kit",
     "tests.test_accesstrace",
     "tests.test_access_alert",
+    "tests.test_mcp2_proxy",
 ]
 
 

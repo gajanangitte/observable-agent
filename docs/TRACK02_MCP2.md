@@ -158,6 +158,32 @@ clone: if a future SigNoz release adds, removes, or reshapes a tool, the fingerp
 changes and the contract breaches with a readable added / removed / changed diff. Re pin
 deliberately with `python mcp2_cert.py --pin-baseline`.
 
+## The always-on proxy (auto-instrument any client)
+
+The cert runner is the ACTIVE probe: it drives a fixed battery on demand. Its passive
+companion is `mcp2_proxy.py`, a transparent instrumentation proxy for the same
+streamable-HTTP transport. Point ANY MCP client at the proxy instead of at the real
+server, and every JSON-RPC interaction between them becomes a `mcp.<method>` CLIENT span
+and a `mcp.client.*` metric, with ZERO code changes to the client OR the server.
+
+```
+your MCP client  ->  mcp2_proxy (:8009)  ->  real MCP server (:8000)
+                        |  emits mcp.<method> spans + mcp.client.* metrics
+                        v  (the exact same vocabulary mcp2_probe emits)
+                      SigNoz
+```
+
+The proxy forwards bytes faithfully in both directions: single JSON responses and
+Server-Sent-Events streams, the `Mcp-Session-Id` header, notifications (the 202 path),
+GET streams and DELETE teardown. It never alters the protocol; the instrumentation is
+pure observation layered on top, and all of it lives in the offline, unit tested
+`mcp2_proxy_core` (JSON-RPC parsing, SSE parsing, and the outcome grading that mirrors
+the probe's `ok` / `error` / `fail` and `protocol` / `tool_error` / `transport` classes).
+A bounded copy of each response is kept only for grading, so a long lived stream can never
+grow memory without limit, and a body it cannot parse is forwarded untouched rather than
+failing the call. This is how you get SigNoz-native MCP observability for a client you do
+not own and cannot modify.
+
 ## Reproduce it
 
 ```
@@ -166,7 +192,12 @@ python mcp2_cert.py                      # certify the live MCP server, CERTIFIE
 python mcp2_cert.py --fault corrupt:signoz_list_alert_rules   # one red cell, FAILED
 python mcp2_dashboard.py                 # verify every panel, then create the dashboard
 python mcp2_alert.py --ensure            # create the breach + blind spot alerts
-python tests/run_all.py                  # 127 unit tests (44 for this lab), no network
+python tests/run_all.py                  # 234 unit tests (68 for this lab), no network
+
+# the always-on proxy: auto-instrument ANY MCP client, no code changes
+python mcp2_proxy.py --upstream http://localhost:8000/mcp --port 8009
+#   then point your MCP client (or `python mcp2_cert.py --url http://127.0.0.1:8009/mcp`)
+#   at http://127.0.0.1:8009/mcp and watch mcp.* spans appear on service mcp-proxy
 ```
 
 ## Live proof
@@ -178,6 +209,13 @@ python tests/run_all.py                  # 127 unit tests (44 for this lab), no 
 * All three signals confirmed queryable in SigNoz: the `mcp.cert.suite` roots and the
   instrumented `mcp.tools/call` spans, the `mcp.cert.contract` and `mcp.client.*`
   metrics, and the `mcp2.*` lifecycle logs.
+* The proxy was validated end to end: driving the cert battery THROUGH
+  `mcp2_proxy` (`--url http://127.0.0.1:8009/mcp`) still graded **CERTIFIED** with the
+  identical catalog fingerprint (a faithful passthrough), while the proxy emitted its own
+  `mcp.initialize` / `mcp.tools/list` / `mcp.tools/call` spans on service `mcp-proxy`,
+  correctly grading each call (`signoz_get_top_metrics` ok, the missing-id reads
+  `tool_error`, the nonexistent tool rejected), all confirmed queryable including the
+  `mcp2.proxy=true` marker.
 
 ## Honest lessons
 
