@@ -265,8 +265,9 @@ model, then breaches on the share of that energy WASTED on dropped and retried c
 retry tax, priced in carbon, held to the same 5 percent floor as the retry SLO). Because
 a healthy cohort wastes zero energy, the signal is calibration free and the heal's verify
 can never be rolled back by token noise. The SAME policy gated mitigation that fixes
-reliability also fixes sustainability: measured live, energy per answer fell from about
-1176 J to 867 J as roughly 309 J per answer of wasted retry energy went to zero. The
+reliability also fixes sustainability: measured live on one traced heal, energy per
+answer fell from 1358 J to 941 J (about 31 percent) as the wasted retry energy per
+answer went to zero. The
 healer records `heal.energy.joules_per_answer` and `heal.carbon.grams_per_answer` (pre
 and post) so SigNoz shows the footprint drop. One loop, three tracks. See the cross track
 section in [`docs/TRACK03_WATTTRACE.md`](docs/TRACK03_WATTTRACE.md).

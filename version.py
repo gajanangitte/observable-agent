@@ -36,7 +36,11 @@ def _git(*args):
         out = subprocess.run(
             ["git", *args], cwd=_HERE, capture_output=True, text=True,
             timeout=_TIMEOUT_S)
-    except (OSError, subprocess.SubprocessError):
+    except Exception:
+        # Never raise. A missing git binary or non-repo checkout (OSError), a
+        # timeout (SubprocessError), or any rarer spawn failure under heavy load
+        # all fold to None so callers fall back cleanly: this runs inside
+        # telemetry setup and must not be able to crash the workload it observes.
         return None
     if out.returncode != 0:
         return None

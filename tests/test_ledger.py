@@ -137,3 +137,38 @@ def test_deterministic_ts_makes_hash_reproducible():
         for p in (p1, p2):
             if os.path.exists(p):
                 os.remove(p)
+
+
+def test_corrupt_ledger_is_not_reported_intact():
+    # A garbled ledger must read as an integrity FAILURE, never a false INTACT, and
+    # readers must degrade gracefully instead of crashing.
+    path = _tmp()
+    try:
+        with open(path, "w") as f:
+            f.write("{ this is not valid json")
+        ok, msg = L.verify_chain(path)
+        assert ok is False
+        assert L.head(path) is None
+        assert L.records(path) == []
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def test_append_refuses_to_overwrite_corrupt_ledger():
+    # append must NOT silently wipe a ledger it cannot parse; it raises so the
+    # existing (possibly recoverable) file is preserved for an operator.
+    path = _tmp()
+    try:
+        with open(path, "w") as f:
+            f.write("garbage not json")
+        raised = False
+        try:
+            L.append("outcome", {"healed": True}, path=path)
+        except L.LedgerCorrupt:
+            raised = True
+        assert raised is True
+        assert open(path).read() == "garbage not json"
+    finally:
+        if os.path.exists(path):
+            os.remove(path)

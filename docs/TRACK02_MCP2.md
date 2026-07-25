@@ -192,7 +192,7 @@ python mcp2_cert.py                      # certify the live MCP server, CERTIFIE
 python mcp2_cert.py --fault corrupt:signoz_list_alert_rules   # one red cell, FAILED
 python mcp2_dashboard.py                 # verify every panel, then create the dashboard
 python mcp2_alert.py --ensure            # create the breach + blind spot alerts
-python tests/run_all.py                  # 284 unit tests (68 for this lab), no network
+python tests/run_all.py                  # 289 unit tests (68 for this lab), no network
 
 # the always-on proxy: auto-instrument ANY MCP client, no code changes
 python mcp2_proxy.py --upstream http://localhost:8000/mcp --port 8009

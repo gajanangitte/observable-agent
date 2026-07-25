@@ -124,6 +124,23 @@ def test_hlog_prefixes_keys_and_coerces_non_primitives():
         lg.removeHandler(handler)
 
 
+# --- ledger writes are best-effort (a write fault never aborts a heal) --------
+
+def test_ledger_write_failure_does_not_abort_heal():
+    import heal_ledger
+    orig = heal_ledger.append
+
+    def _boom(*a, **k):
+        raise OSError("simulated os.replace lock (WinError 32)")
+
+    heal_ledger.append = _boom
+    try:
+        # self_heal._ledger wraps the append: it must swallow the fault, not raise.
+        self_heal._ledger("outcome", {"healed": True})
+    finally:
+        heal_ledger.append = orig
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

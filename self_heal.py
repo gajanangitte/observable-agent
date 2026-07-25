@@ -83,6 +83,21 @@ def _hlog(event, level=logging.INFO, **attrs):
         extra[key] = v if isinstance(v, (str, bool, int, float)) else str(v)
     log.log(level, "heal.%s %s", event, fields, extra=extra)
 
+
+def _ledger(event, data):
+    """Append one record to the tamper-evident audit ledger, best-effort.
+
+    The ledger only RECORDS the governed heal; a write fault (a Windows os.replace
+    collision with the read-only console, or a corrupt ledger we refuse to
+    overwrite) must never abort the remediation itself. The failure is logged and
+    the heal proceeds; the verify_chain stamped on the trace still surfaces any gap.
+    """
+    try:
+        heal_ledger.append(event, data)
+    except Exception as exc:  # noqa: BLE001 - the heal must survive a ledger I/O fault
+        _hlog("ledger.error", level=logging.WARNING, led_event=event, error=str(exc))
+
+
 HEAL_SYSTEM = (
     "You are a self-healing SRE agent. You work in two steps. "
     "STEP 1: call read_incident to pull the breach evidence from SigNoz. "
@@ -342,7 +357,7 @@ def main():
               severity=(slo.get("fingerprint") or {}).get("severity", "n/a"),
               fingerprint=(slo.get("fingerprint") or {}).get("class_id", "n/a"),
               anomaly_only=bool(slo.get("anomaly_only")))
-        heal_ledger.append("breach.detected", {
+        _ledger("breach.detected", {
             "slo": slo["slo"], "cohort": pre, "value": pre_str,
             "severity": (slo.get("fingerprint") or {}).get("severity", "n/a"),
             "fingerprint": (slo.get("fingerprint") or {}).get("class_id", "n/a"),
@@ -492,7 +507,7 @@ def main():
             _hlog("grounding", action=chosen, tier=grounding.tier,
                   grounded=grounding.grounded, score=grounding.score,
                   evidence_read=grounding.evidence_read)
-            heal_ledger.append("action.applied", {
+            _ledger("action.applied", {
                 "action": chosen, "source": decider, "attempt": attempt,
                 "grounding_tier": grounding.tier, "grounding_score": grounding.score,
                 "trace_id": trace_id_hex})
@@ -515,7 +530,7 @@ def main():
                 print("  " + after["headline"])
             _hlog("verify", slo=slo["slo"], cohort=post, status=after["status"],
                   breached=bool(after["breached"]), healed=after["status"] == heal_sensors.STATUS_PASS)
-            heal_ledger.append("verify", {
+            _ledger("verify", {
                 "cohort": post, "status": after["status"],
                 "healed": after["status"] == heal_sensors.STATUS_PASS,
                 "trace_id": trace_id_hex})
@@ -537,7 +552,7 @@ def main():
                           f"control-plane change to its pre-action snapshot.")
                 _hlog("rollback", level=logging.WARNING, action=chosen, attempt=attempt,
                       status=after["status"])
-                heal_ledger.append("rollback", {
+                _ledger("rollback", {
                     "action": chosen, "attempt": attempt, "status": after["status"],
                     "trace_id": trace_id_hex})
                 heal_metrics.rollback(chosen)
@@ -553,7 +568,7 @@ def main():
               slo=slo["slo"], healed=healed, escalated=bool(escalated),
               action=chosen or "none", decider=decider or "none",
               mttr_s=round(mttr_ms / 1000, 1))
-        heal_ledger.append("outcome", {
+        _ledger("outcome", {
             "slo": slo["slo"], "healed": healed, "escalated": bool(escalated),
             "action": chosen or "none", "decider": decider or "none",
             "mttr_s": round(mttr_ms / 1000, 1), "trace_id": trace_id_hex})
@@ -573,7 +588,12 @@ def main():
             root.set_attribute("heal.memory.times_proven", rec.get("count", 0))
             print(f"  learned: '{chosen}' recorded as a verified fix for incident class "
                   f"{fp_obj.class_id} (proven {rec.get('count', 0)}x).")
-        root.set_status(Status(StatusCode.OK))
+        if healed:
+            root.set_status(Status(StatusCode.OK))
+        else:
+            root.set_status(Status(StatusCode.ERROR,
+                                   "escalated for human approval" if escalated
+                                   else "heal did not verify"))
 
         if escalated:
             _banner("NOT HEALED -- ESCALATED FOR HUMAN APPROVAL")

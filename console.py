@@ -71,6 +71,38 @@ def _memory_view():
     return out
 
 
+_STATUS_RANK = {"BREACH": 3, "UNKNOWN": 2, "PASS": 1}
+
+
+def _worst_cohort(report):
+    """The most newsworthy cohort in a WattTrace/AccessTrace report (BREACH beats
+    UNKNOWN beats PASS). Both reports keep their verdicts under ``cohorts`` rather
+    than at the top level, so an operator sees the worst live verdict at a glance."""
+    cohorts = (report or {}).get("cohorts") or []
+    if not cohorts:
+        return None
+    return max(cohorts, key=lambda c: _STATUS_RANK.get(c.get("status"), 0))
+
+
+def _watt_view(watt):
+    c = _worst_cohort(watt)
+    if c is None:
+        return None
+    return {"status": c.get("status"),
+            "cohort": c.get("name"),
+            "joules_per_answer": c.get("joules_per_verified_answer"),
+            "grams_per_answer": c.get("gco2_per_verified_answer")}
+
+
+def _access_view(access):
+    c = _worst_cohort(access)
+    if c is None:
+        return None
+    return {"status": c.get("status"),
+            "cohort": c.get("name"),
+            "weighted_score": c.get("weighted_score")}
+
+
 def snapshot():
     """Gather all on-disk state into one JSON-serialisable dict. PURE (no sockets).
 
@@ -122,15 +154,8 @@ def snapshot():
             "fault_injected": mcp2.get("fault_injected"),
             "captured_at": mcp2.get("captured_at"),
         },
-        "watttrace": None if not watt else {
-            "verdict": watt.get("verdict") or watt.get("status"),
-            "joules_per_answer": watt.get("joules_per_answer"),
-            "grams_per_answer": watt.get("grams_per_answer"),
-        },
-        "accesstrace": None if not access else {
-            "verdict": access.get("verdict") or access.get("status"),
-            "debt": access.get("debt") or access.get("weighted_debt"),
-        },
+        "watttrace": _watt_view(watt),
+        "accesstrace": _access_view(access),
     }
 
 
@@ -188,9 +213,15 @@ def render_html(snap=None):
 
     watt = s.get("watttrace")
     watt_html = (_pill("no report", ok=None) if not watt else
-                 (_pill(watt.get("verdict", "?"), ok=(watt.get("verdict") == "PASS"))
-                  + (f' · {watt.get("joules_per_answer")} J/answer'
+                 (_pill(watt.get("status", "?"), ok=(watt.get("status") == "PASS"))
+                  + (f' · {html.escape(str(watt.get("joules_per_answer")))} J/answer'
                      if watt.get("joules_per_answer") is not None else "")))
+
+    access = s.get("accesstrace")
+    access_html = (_pill("no report", ok=None) if not access else
+                   (_pill(access.get("status", "?"), ok=(access.get("status") == "PASS"))
+                    + (f' · weighted debt {html.escape(str(access.get("weighted_score")))}'
+                       if access.get("weighted_score") is not None else "")))
 
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -237,6 +268,7 @@ def render_html(snap=None):
   {section("Control plane", _rows(["knob", "value"], cp_rows))}
   {section("MCP Contract Lab (Track 02)", f'<p>{mcp2_html}</p>')}
   {section("WattTrace GreenOps (Track 03)", f'<p>{watt_html}</p>')}
+  {section("AccessTrace WCAG (Track 03)", f'<p>{access_html}</p>')}
 </main>
 <footer>SigNoz is the deep observability surface; this console is the at-a-glance operator panel next to it.</footer>
 </body></html>"""

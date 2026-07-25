@@ -33,6 +33,15 @@ PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "heal_ledger.jso
 GENESIS_PREV = "0" * 64
 
 
+class LedgerCorrupt(Exception):
+    """The ledger file exists but is not a readable JSON array.
+
+    Raised instead of silently returning an empty chain, so a garbled ledger is
+    reported as an integrity failure (never a false ``INTACT``) and ``append``
+    refuses to overwrite it -- the audit trail is preserved, not quietly wiped.
+    """
+
+
 def _canonical(record):
     """Deterministic bytes for hashing: every field EXCEPT the record's own hash,
     serialised with sorted keys + compact separators so ordering never matters."""
@@ -45,19 +54,42 @@ def _hash(record):
 
 
 def _load(path):
+    """Return the chain list. A MISSING file is an empty ledger; a file that EXISTS
+    but is corrupt (unreadable or not a JSON array) raises ``LedgerCorrupt`` instead
+    of being silently discarded, so a garbled ledger can never read as intact nor be
+    quietly overwritten by the next append."""
     try:
         with open(path) as f:
-            d = json.load(f)
-            return d if isinstance(d, list) else []
-    except (FileNotFoundError, ValueError):
+            data = json.load(f)
+    except FileNotFoundError:
         return []
+    except (ValueError, OSError) as exc:
+        raise LedgerCorrupt(f"{path} is unreadable or not valid JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise LedgerCorrupt(f"{path} is not a JSON array")
+    return data
 
 
 def _save(path, chain):
-    tmp = path + ".tmp"
+    """Atomically replace the ledger (tmp + os.replace). On Windows a concurrent
+    reader (e.g. the read-only status console) can briefly hold the target file, so
+    the final replace is retried a few times before giving up."""
+    tmp = f"{path}.tmp.{os.getpid()}"
     with open(tmp, "w") as f:
         json.dump(chain, f, indent=2)
-    os.replace(tmp, path)
+    last = None
+    for _ in range(6):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError as exc:
+            last = exc
+            time.sleep(0.05)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    raise last
 
 
 def append(event, data=None, path=PATH, ts=None):
@@ -91,7 +123,10 @@ def verify_chain(path=PATH):
     contiguous ``seq``. The first failure names the offending record; an empty or
     missing ledger is trivially valid.
     """
-    chain = _load(path)
+    try:
+        chain = _load(path)
+    except LedgerCorrupt as exc:
+        return False, str(exc)
     prev_hash = GENESIS_PREV
     for i, record in enumerate(chain):
         if record.get("seq") != i:
@@ -106,18 +141,28 @@ def verify_chain(path=PATH):
 
 
 def head(path=PATH):
-    """The current head record (or None for an empty ledger)."""
-    chain = _load(path)
+    """The current head record (or None for an empty or unreadable ledger)."""
+    try:
+        chain = _load(path)
+    except LedgerCorrupt:
+        return None
     return chain[-1] if chain else None
 
 
 def records(path=PATH):
-    return _load(path)
+    """Every record, or an empty list for a missing or unreadable ledger."""
+    try:
+        return _load(path)
+    except LedgerCorrupt:
+        return []
 
 
 def _main():
     ok, msg = verify_chain()
-    chain = _load(PATH)
+    try:
+        chain = _load(PATH)
+    except LedgerCorrupt:
+        chain = []
     print(f"heal ledger: {PATH}")
     print(f"  status: {'INTACT' if ok else 'TAMPERED'} -- {msg}")
     if chain:

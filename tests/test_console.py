@@ -164,3 +164,41 @@ def test_once_cli_renders_without_server():
         assert json.loads(buf.getvalue().decode("utf-8"))["ledger"]["intact"] is True
     finally:
         undo()
+
+
+def test_snapshot_reads_cohort_reports():
+    # WattTrace/AccessTrace keep verdicts under 'cohorts'; the console must surface
+    # the worst live verdict (and its energy), not read absent top-level fields.
+    d, undo = _isolate()
+    try:
+        _write(d, "watt_report.json", {"cohorts": [
+            {"name": "control", "status": "PASS",
+             "joules_per_verified_answer": 575.0, "gco2_per_verified_answer": 0.07},
+            {"name": "chaos", "status": "BREACH",
+             "joules_per_verified_answer": 1101.0, "gco2_per_verified_answer": 0.14}]})
+        _write(d, "access_report.json", {"cohorts": [
+            {"name": "inaccessible", "status": "BREACH", "weighted_score": 40}]})
+        s = console.snapshot()
+        assert s["watttrace"]["status"] == "BREACH"          # worst cohort surfaced
+        assert s["watttrace"]["joules_per_answer"] == 1101.0
+        assert s["accesstrace"]["status"] == "BREACH"
+        text = console.render_html().decode("utf-8")
+        assert "AccessTrace" in text                          # both track panels render
+        assert "1101" in text
+    finally:
+        undo()
+
+
+def test_render_html_escapes_report_values():
+    # A report is untrusted input too: a value smuggled into a cohort field must be
+    # escaped, never injected into the page.
+    d, undo = _isolate()
+    try:
+        _write(d, "watt_report.json", {"cohorts": [
+            {"name": "x", "status": "PASS",
+             "joules_per_verified_answer": "<script>alert(2)</script>"}]})
+        text = console.render_html().decode("utf-8")
+        assert "<script>alert(2)</script>" not in text
+        assert "&lt;script&gt;" in text
+    finally:
+        undo()
