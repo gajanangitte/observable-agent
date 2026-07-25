@@ -22,6 +22,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 import config
+import version
 
 _providers = {}
 _tokens = _cost = _llm_latency = _tool_latency = _requests = _retries = None
@@ -39,8 +40,12 @@ def _tag(attrs):
 def setup_telemetry():
     resource = Resource.create({
         "service.name": config.SERVICE_NAME,
-        "service.version": "1.0.0",
         "deployment.environment": config.ENVIRONMENT,
+        # Deploy/version correlation: service.version + deployment.commit/branch/
+        # dirty, derived from git so every trace, metric, and log is tied to the
+        # exact build that produced it (group by service.version in SigNoz to pin
+        # a regression to a release). Falls back to a static version off a git repo.
+        **version.deployment_attributes(),
     })
     base = config.OTLP_ENDPOINT.rstrip("/")
     # Fail fast: under heavy local CPU load the SigNoz ingester can be slow to

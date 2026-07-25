@@ -159,7 +159,7 @@ playwright install chromium              # one time, downloads the browser
 python access_report.py                  # inaccessible vs accessible demo, exports to SigNoz
 python access_dashboard.py               # (re)create the self verifying dashboard
 python access_alert.py --ensure          # create the two alerts
-python tests/run_all.py                  # 210 network free tests, includes AccessTrace
+python tests/run_all.py                  # 284 network free tests, includes AccessTrace
 ```
 
 The demo pages ([`access_demo/inaccessible.html`](../access_demo/inaccessible.html)

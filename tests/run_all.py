@@ -60,6 +60,11 @@ MODULES = [
     "tests.test_accesstrace",
     "tests.test_access_alert",
     "tests.test_mcp2_proxy",
+    "tests.test_grounding",
+    "tests.test_ledger",
+    "tests.test_chaos",
+    "tests.test_version",
+    "tests.test_console",
 ]
 
 

@@ -57,6 +57,8 @@ import heal_actuators
 import heal_policy
 import heal_fingerprint
 import heal_memory
+import heal_grounding
+import heal_ledger
 from heal_controls import Controls, BROKEN, BROKEN_COST
 from mcp_client import SigNozMCP
 from agent import Agent
@@ -340,6 +342,11 @@ def main():
               severity=(slo.get("fingerprint") or {}).get("severity", "n/a"),
               fingerprint=(slo.get("fingerprint") or {}).get("class_id", "n/a"),
               anomaly_only=bool(slo.get("anomaly_only")))
+        heal_ledger.append("breach.detected", {
+            "slo": slo["slo"], "cohort": pre, "value": pre_str,
+            "severity": (slo.get("fingerprint") or {}).get("severity", "n/a"),
+            "fingerprint": (slo.get("fingerprint") or {}).get("class_id", "n/a"),
+            "trace_id": trace_id_hex})
 
         # A statistical anomaly that is NOT also a fixed-floor breach is real but
         # lower-confidence: propose it (autonomy capped at 'suggest'), never
@@ -466,6 +473,33 @@ def main():
             root.set_attribute("heal.decision.source", decider)
             root.set_attribute("heal.recall.hit", decider == "memory")
             root.set_attribute(f"heal.action.{attempt}", chosen)
+
+            # ---- GROUND: was this decision actually supported by the evidence? --
+            # An INDEPENDENT auditor scores how well the chosen fix is grounded in
+            # the real SigNoz incident evidence, producing a confidence tier stamped
+            # next to the action. It never blocks (the policy gate is the safety
+            # authority); it makes the QUALITY of the decision observable, so a
+            # low-confidence heal cannot hide behind a green outcome. A LOW/NONE
+            # verdict caps this episode's autonomy at 'suggest' for any FURTHER
+            # action, so an ungrounded fix can never silently auto-apply next.
+            grounding = heal_grounding.audit(
+                slo=slo["slo"], action=chosen, decider=decider,
+                evidence_read=("read_incident" in decisions),
+                fingerprint_known=(fp_obj is not None),
+                hard_floor=not bool(slo.get("anomaly_only")))
+            grounding.annotate(root)
+            print("  " + grounding.line())
+            _hlog("grounding", action=chosen, tier=grounding.tier,
+                  grounded=grounding.grounded, score=grounding.score,
+                  evidence_read=grounding.evidence_read)
+            heal_ledger.append("action.applied", {
+                "action": chosen, "source": decider, "attempt": attempt,
+                "grounding_tier": grounding.tier, "grounding_score": grounding.score,
+                "trace_id": trace_id_hex})
+            if not grounding.grounded:
+                episode_policy = heal_policy.Policy(autonomy="suggest")
+                root.set_attribute("heal.grounding.capped_autonomy", "suggest")
+
             actions_left = [a for a in actions_left
                             if a != chosen and not chosen.startswith(a)]
 
@@ -481,6 +515,10 @@ def main():
                 print("  " + after["headline"])
             _hlog("verify", slo=slo["slo"], cohort=post, status=after["status"],
                   breached=bool(after["breached"]), healed=after["status"] == heal_sensors.STATUS_PASS)
+            heal_ledger.append("verify", {
+                "cohort": post, "status": after["status"],
+                "healed": after["status"] == heal_sensors.STATUS_PASS,
+                "trace_id": trace_id_hex})
             # Only a positive PASS counts as healed. BREACH or UNKNOWN (blind) both
             # mean 'not verified healed' -> roll the change back.
             healed = after["status"] == heal_sensors.STATUS_PASS
@@ -499,6 +537,9 @@ def main():
                           f"control-plane change to its pre-action snapshot.")
                 _hlog("rollback", level=logging.WARNING, action=chosen, attempt=attempt,
                       status=after["status"])
+                heal_ledger.append("rollback", {
+                    "action": chosen, "attempt": attempt, "status": after["status"],
+                    "trace_id": trace_id_hex})
                 heal_metrics.rollback(chosen)
                 root.set_attribute(f"heal.rollback.{attempt}", chosen)
 
@@ -512,6 +553,17 @@ def main():
               slo=slo["slo"], healed=healed, escalated=bool(escalated),
               action=chosen or "none", decider=decider or "none",
               mttr_s=round(mttr_ms / 1000, 1))
+        heal_ledger.append("outcome", {
+            "slo": slo["slo"], "healed": healed, "escalated": bool(escalated),
+            "action": chosen or "none", "decider": decider or "none",
+            "mttr_s": round(mttr_ms / 1000, 1), "trace_id": trace_id_hex})
+        # The ledger is append-only and hash-chained; re-verify it here so the heal
+        # trace itself carries proof the audit record was not tampered with.
+        ledger_ok, ledger_msg = heal_ledger.verify_chain()
+        root.set_attribute("heal.ledger.intact", ledger_ok)
+        root.set_attribute("heal.ledger.records", len(heal_ledger.records()))
+        if not ledger_ok:
+            root.set_attribute("heal.ledger.problem", ledger_msg)
 
         # LEARN: a verified heal (SigNoz-confirmed) becomes episodic memory, so
         # the next occurrence of this incident class can be replayed with no LLM.
@@ -540,6 +592,9 @@ def main():
         print(f"  MTTR:        {mttr_ms / 1000:.0f}s   (breach detected -> verified)")
         print(f"  trace:       agent.heal   {trace_id_hex}")
         print(f"  view:        {SIGNOZ_UI}/trace/{trace_id_hex}")
+        _lhead = heal_ledger.head()
+        print(f"  ledger:      {'INTACT' if ledger_ok else 'TAMPERED'} "
+              f"({len(heal_ledger.records())} records, head {(_lhead or {}).get('hash','')[:12]})")
 
         # ---- IMPACT: translate the heal into real money -------------------
         # Benchmarks (LLM list prices + cost of downtime) that a company plugs
