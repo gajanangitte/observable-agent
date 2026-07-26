@@ -102,6 +102,8 @@ python console.py        # live operator web UI on http://127.0.0.1:8033
 ```
 A read only status page: audit ledger integrity, verified fix memory with trace links, the per track verdicts, and the exact git build it is running, with nothing to pip install.
 
+![The zero dependency operator console: tamper evident ledger, verified remediation memory, and the per track verdicts](docs/shots/09_console.png)
+
 **One `pip install`, still no stack:**
 ```bash
 pip install -r requirements.txt

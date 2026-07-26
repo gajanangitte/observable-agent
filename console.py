@@ -238,8 +238,9 @@ def render_html(snap=None):
  h2 {{ margin:0 0 12px; font-size:14px; text-transform:uppercase; letter-spacing:.04em; color:#8b949e; }}
  table {{ width:100%; border-collapse:collapse; font-size:13px; }}
  th, td {{ text-align:left; padding:6px 8px; border-bottom:1px solid #21262d; }}
+ td {{ overflow-wrap:anywhere; }}
  th {{ color:#8b949e; font-weight:600; }}
- code {{ background:#0d1117; padding:1px 5px; border-radius:4px; font-size:12px; }}
+ code {{ background:#0d1117; padding:1px 5px; border-radius:4px; font-size:12px; overflow-wrap:anywhere; }}
  .pill {{ display:inline-block; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600;
           background:#30363d; color:#e6edf3; }}
  .pill.ok {{ background:#1a7f37; }}
