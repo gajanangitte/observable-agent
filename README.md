@@ -15,6 +15,8 @@ track: a live retry heal landing in SigNoz, the cost circuit breaker, memory rec
 incident with no model call, accessibility as telemetry, the always on MCP proxy, and the GreenOps
 carbon finale.)
 
+**Built in the hackathon window.** Two thirds of the commits land in the Jul 20 to 26 sprint, which added the tamper evident audit ledger, the named chaos catalog, the offline eval harness, the MCP Contract Lab and its always on proxy, WattTrace GreenOps, AccessTrace, the three signal dashboard, and the status console; the Jul 18 to 19 commits are the Early Win blog warm up the hackathon asks for.
+
 > The vision: turning SigNoz powered observability into action: an open, OTel native reliability layer that *heals* AI agents on top of the telemetry SigNoz already gives you: [`docs/PITCH.md`](docs/PITCH.md).
 
 **Why it stands out.** Most agent observability stops at watching. This one closes the loop and *acts*, under governance:
