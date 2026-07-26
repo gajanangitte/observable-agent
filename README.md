@@ -10,6 +10,11 @@ Built for the *Agents of SigNoz* hackathon (WeMakeDevs × SigNoz). It began as a
 instrumented SRE sidekick, with traces, tokens, cost, and latency for every LLM call
 and tool, and grew into a closed control loop that turns observability into action.
 
+**▶️ Watch the 3 minute demo: [youtu.be/8euGP-KbZKg](https://youtu.be/8euGP-KbZKg)** (chaptered by
+track: a live retry heal landing in SigNoz, the cost circuit breaker, memory recall that fixes an
+incident with no model call, accessibility as telemetry, the always on MCP proxy, and the GreenOps
+carbon finale.)
+
 > The vision: turning SigNoz powered observability into action: an open, OTel native reliability layer that *heals* AI agents on top of the telemetry SigNoz already gives you: [`docs/PITCH.md`](docs/PITCH.md).
 
 **Why it stands out.** Most agent observability stops at watching. This one closes the loop and *acts*, under governance:
@@ -319,6 +324,16 @@ The dashboard builders all share one self verifying core, [`dashboard_kit.py`](d
 (ProofKit): the Query Builder shapes, the widget envelope, and the dual shape result
 counter that proves every panel resolves against `/api/v5/query_range` before the
 dashboard is created. A new artifact gets a self verifying dashboard for free.
+
+## Written up in depth
+
+The engineering behind this repo, published on dev.to during the hackathon:
+
+- [One governed loop, three SigNoz tracks](https://dev.to/gajanangitte/one-governed-loop-three-signoz-tracks-an-agent-that-heals-prices-its-own-carbon-and-gates-2kn9): the project writeup, how a single governed heal spans all three tracks and prices its own carbon.
+- [The agent that heals itself: closing the loop with SigNoz](https://dev.to/gajanangitte/the-agent-that-heals-itself-closing-the-loop-with-signoz-2i34): the detect, diagnose, act, verify, roll back control loop as one trace.
+- [I gave my local Llama agent the SigNoz MCP server and asked it to debug itself](https://dev.to/gajanangitte/i-gave-my-local-llama-agent-the-signoz-mcp-server-and-asked-it-to-debug-itself-5909): MCP as the agent's sensor, the agent observing the agent.
+- [The retry tax: what a local Llama agent's silent retries actually cost](https://dev.to/gajanangitte/the-retry-tax-what-a-local-llama-agents-silent-retries-actually-cost-measured-in-self-hosted-3io2): measuring invisible waste in self hosted SigNoz.
+- [I gave a local Llama agent OpenTelemetry eyes](https://dev.to/gajanangitte/i-gave-a-local-llama-agent-opentelemetry-eyes-tracing-tokens-cost-and-the-latency-tail-in-4380): the original instrumentation, traces, tokens, cost, and the latency tail.
 
 ## Repo layout
 
