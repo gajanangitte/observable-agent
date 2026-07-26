@@ -12,6 +12,14 @@ and tool, and grew into a closed control loop that turns observability into acti
 
 > The vision: turning SigNoz powered observability into action: an open, OTel native reliability layer that *heals* AI agents on top of the telemetry SigNoz already gives you: [`docs/PITCH.md`](docs/PITCH.md).
 
+**Why it stands out.** Most agent observability stops at watching. This one closes the loop and *acts*, under governance:
+
+- **Self healing, not just dashboards.** Detect an SLO breach, diagnose from telemetry, apply a policy gated fix, verify it on a canary, and roll back if it does not hold, all as one `agent.heal` trace.
+- **A carbon signal no one else measures.** WattTrace GreenOps prices every wasted retry in joules and gCO2e and heals a carbon SLO; AccessTrace turns a WCAG user journey into a trace, so an accessibility regression is localised like a latency one.
+- **Governed autonomy.** A policy gate (autonomy, risk, blast radius), an independent groundedness auditor that caps autonomy on an ungrounded decision, and a tamper evident, hash chained audit ledger checked live on every heal.
+- **Verified memory.** A SigNoz proven fix is recalled by incident fingerprint and replayed with no model call.
+- **Runs on your laptop.** Local model on Ollama, self hosted SigNoz, zero cloud and zero API keys, 289 network free tests.
+
 ---
 
 ## 🏆 Competition project: the self healing control loop
@@ -78,6 +86,24 @@ The write ups this repo was built on:
 ## ▶️ Reproduce it (judges start here)
 
 Everything runs locally, self hosted SigNoz + a local model. No cloud, no API keys, no bill.
+
+### See it work in about 60 seconds (no Docker, no SigNoz, no Ollama, no API keys)
+
+These run on your machine right after `git clone`, before you stand up anything.
+
+**Zero install**, pure Python standard library:
+```bash
+python console.py        # live operator web UI on http://127.0.0.1:8033
+```
+A read only status page: audit ledger integrity, verified fix memory with trace links, the per track verdicts, and the exact git build it is running, with nothing to pip install.
+
+**One `pip install`, still no stack:**
+```bash
+pip install -r requirements.txt
+python eval.py --no-export     # 35 adversarial episodes, 0 unsafe actions, exits 0 in about 7s
+python tests/run_all.py        # 289 network free tests, no SigNoz and no model needed
+```
+`eval.py` is the chaos harness: it drives the real detection, policy gate, memory and rollback code across scripted incidents and proves the one invariant that matters, the healer never acts on a workload it should not. Then stand up the full stack below to watch a real heal land in SigNoz.
 
 **1. Install SigNoz + its MCP server with Foundry.** This repo ships the exact
 [`casting.yaml`](casting.yaml) + [`casting.yaml.lock`](casting.yaml.lock) so you can reproduce the deployment:

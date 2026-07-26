@@ -121,7 +121,7 @@ SCN = {
         "actions": ["set_cost_budget", "switch_model"],
         "fallback": "set_cost_budget",
         "breach": World(total=40, requests=5),      # 8 calls/req (> 6)
-        "ok": World(total=15, requests=5),          # 3 calls/req
+        "ok": World(total=10, requests=5),          # 2 calls/req, back to the healthy baseline
         "healthy": World(total=10, requests=5),     # 2 calls/req
     },
 }
